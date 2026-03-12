@@ -9,7 +9,11 @@
   <img src="https://img.shields.io/badge/Agents-5%20roles-blue" alt="Agents: 5 roles">
 </p>
 
-An adversarial development pipeline for Claude Code. Features go through iterative plan-implement-review cycles where separate AI agents check each other's work in a GAN-like architecture — generators (Planner, Implementer) produce artifacts, discriminators (Plan Reviewer, Code Reviewer, Final Reviewer) validate them, and feedback loops drive convergence.
+<p align="center">
+ <a href="https://portfolio.hatstack.fun/read/post/Claude-Forge">Adversarial GANs Blog</a>
+</p>
+
+An adversarial development pipeline for Claude Code. Features go through iterative plan-implement-review cycles where separate AI agents check each other's work in a GAN-like architecture, generators (Planner, Implementer) produce artifacts, discriminators (Plan Reviewer, Code Reviewer, Final Reviewer) validate them, and feedback loops drive convergence.
 
 ## Architecture
 
@@ -17,7 +21,7 @@ An adversarial development pipeline for Claude Code. Features go through iterati
   <img src="arch.jpeg" alt="Claude Forge Architecture" width="700">
 </p>
 
-Each agent runs in its own context window with a fresh perspective. Feedback flows through a shared `feedback.md` file — plan documents are never mutated by reviewers.
+Each agent runs in its own context window with a fresh perspective. Feedback flows through a shared `feedback.md` file, plan documents are never mutated by reviewers.
 
 ## Skills
 
