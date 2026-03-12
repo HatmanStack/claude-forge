@@ -39,6 +39,14 @@ Reads the brainstorm doc and runs the full plan-implement-review pipeline. Each 
 /pipeline 2026-03-12-notifications
 ```
 
+If the pipeline times out or hits a token limit mid-run, resume by re-running `/pipeline` with the same slug:
+
+```
+/pipeline 2026-03-12-notifications
+```
+
+The orchestrator picks up where it left off using the plan and feedback files already on disk.
+
 ## Pipeline Roles
 
 | Role | Type | Agent Context | Responsibility |
