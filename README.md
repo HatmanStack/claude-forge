@@ -1,4 +1,13 @@
-# Claude Forge
+<p align="center">
+  <img src="banner.jpeg" alt="Claude Forge" width="700">
+</p>
+
+<p align="center">
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+  <a href="https://docs.anthropic.com/en/docs/claude-code"><img src="https://img.shields.io/badge/Built%20for-Claude%20Code-blueviolet" alt="Built for Claude Code"></a>
+  <img src="https://img.shields.io/badge/Architecture-GAN--style-orange" alt="Architecture: GAN-style">
+  <img src="https://img.shields.io/badge/Agents-5%20roles-blue" alt="Agents: 5 roles">
+</p>
 
 An adversarial development pipeline for Claude Code. Features go through iterative plan-implement-review cycles where separate AI agents check each other's work in a GAN-like architecture — generators (Planner, Implementer) produce artifacts, discriminators (Plan Reviewer, Code Reviewer, Final Reviewer) validate them, and feedback loops drive convergence.
 
@@ -181,6 +190,36 @@ Available in every project on your machine.
 - **Plan documents are immutable** once created (only Planner can revise)
 - **Progress reports** between stages keep the user informed
 - **Implementer stops and asks** rather than guessing on ambiguous instructions
+
+## Configuration
+
+### Commit Attribution
+
+The pipeline creates commits through the Implementer agent. By default, commits use whatever git identity is configured in your project. For AI-assisted commits, you may want to add attribution.
+
+**Option A: Co-Authored-By trailer (recommended)**
+
+Add this to your project's `CLAUDE.md` so the Implementer agent includes it automatically:
+
+```markdown
+All commit messages must end with:
+Co-Authored-By: Claude <noreply@anthropic.com>
+```
+
+**Option B: Separate committer identity**
+
+Configure a project-level git identity for AI commits:
+
+```bash
+git config user.name "your-name (via Claude)"
+git config user.email "your-email@example.com"
+```
+
+**Option C: No attribution**
+
+The pipeline works fine with your default git config. Commits will appear as yours.
+
+Choose whichever approach fits your team's audit and attribution requirements. The pipeline does not enforce any specific attribution — that's your project's decision, configured in your project's `CLAUDE.md` or Phase-0.
 
 ## Requirements
 
