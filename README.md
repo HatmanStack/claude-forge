@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="banner.jpeg" alt="Claude Forge" width="700">
+  <img src="text.jpeg" alt="Claude Forge" width="700">
 </p>
 
 <p align="center">
@@ -13,39 +13,9 @@ An adversarial development pipeline for Claude Code. Features go through iterati
 
 ## Architecture
 
-```
-You (human)
- |
- |  /brainstorm "build a user auth system"
- v
-+------------------------------------------------------------------+
-|  BRAINSTORM (interactive, main conversation)                     |
-|  Explore codebase -> Ask questions -> Produce design spec        |
-+------------------------------------------------------------------+
- |
- |  /pipeline 2026-03-12-user-auth
- v
-+------------------------------------------------------------------+
-|  PIPELINE ORCHESTRATOR (spawns agents, routes signals)            |
-|                                                                  |
-|  Stage 1: Planning                                               |
-|  +------------+     +--------------+                             |
-|  |  Planner   | <-> | Plan Reviewer|  GAN loop (max 3 iters)    |
-|  | (generator)|     | (discriminator)                            |
-|  +------------+     +--------------+                             |
-|        |                                                         |
-|  Stage 2: Implementation (per phase)                             |
-|  +--------------+     +----------+                               |
-|  | Implementer  | <-> | Reviewer |    GAN loop (max 3 iters)    |
-|  | (generator)  |     | (discriminator)                          |
-|  +--------------+     +----------+                               |
-|        |                                                         |
-|  Stage 3: Final Review                                           |
-|  +----------------+                                              |
-|  | Final Reviewer |  GO / NO-GO                                  |
-|  +----------------+                                              |
-+------------------------------------------------------------------+
-```
+<p align="center">
+  <img src="arch.jpeg" alt="Claude Forge Architecture" width="700">
+</p>
 
 Each agent runs in its own context window with a fresh perspective. Feedback flows through a shared `feedback.md` file — plan documents are never mutated by reviewers.
 
