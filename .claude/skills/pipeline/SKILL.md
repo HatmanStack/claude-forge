@@ -20,6 +20,24 @@ You coordinate the adversarial development pipeline. Each role runs as a separat
 2. **Read** the brainstorm doc to understand the feature scope
 3. **Read** `pipeline-protocol.md` to load the signal protocol
 
+## Stage 0: Pipeline State Recovery
+
+Before starting any stage, detect prior progress to determine the correct entry point:
+
+1. **Check for plan approval**: Read `docs/plans/$ARGUMENTS/feedback.md` (if it exists) for a `PLAN_APPROVED` signal or resolved `PLAN_REVIEW` entries with no remaining OPEN `PLAN_REVIEW` items
+2. **Check for phase progress**: Look for `PHASE_APPROVED`, OPEN/resolved `CODE_REVIEW` entries, and implementation commits (see Stage 2 State Recovery)
+3. **Check for final review**: Look for `GO` or `NO-GO` entries tagged `FINAL_REVIEW`
+
+Based on findings:
+- `GO` or `NO-GO` in feedback.md → pipeline already completed, report result to user and stop
+- `PHASE_APPROVED` for all phases → skip to Stage 3 (Final Review)
+- Any phase progress exists + `PLAN_APPROVED` → skip to Stage 2 at the correct phase (see State Recovery below)
+- Plan files exist + OPEN `PLAN_REVIEW` feedback → enter Stage 1 at revision step (1a with revision instructions)
+- Plan files exist + no feedback.md or no review entries → enter Stage 1 at review step (1b)
+- No plan files → enter Stage 1 from the start (1a)
+
+Report the detected state to the user before continuing.
+
 ## Stage 1: Planning (Planner ↔ Plan Reviewer GAN Loop)
 
 **Max iterations: 3.** If not approved after 3 cycles, stop and surface the unresolved issues to the user.
@@ -106,6 +124,28 @@ Starting implementation...
 **Max iterations per phase: 3.** If not approved after 3 cycles, stop and surface issues.
 
 Identify all phases by using **Glob** for `docs/plans/$ARGUMENTS/Phase-*.md` (excluding Phase-0). Process them in sequential order.
+
+### State Recovery (Resume Detection)
+
+Before processing phases, determine each phase's completion state. For each Phase-N:
+
+1. **Read** `docs/plans/$ARGUMENTS/feedback.md` and check for:
+   - A `PHASE_APPROVED` entry for Phase N → phase is **done**, skip it
+   - OPEN `CODE_REVIEW` items for Phase N → phase needs **review fixes**, enter at step 2a (Implementer) with revision instructions
+   - Resolved `CODE_REVIEW` items for Phase N but no `PHASE_APPROVED` → phase needs **re-review**, enter at step 2b (Reviewer)
+2. **Check** `git log --oneline` for commits referencing Phase N (e.g., `phase-N`, `Phase N`, `phase N`)
+   - Commits exist but no feedback.md review entries → phase was **implemented but never reviewed**, enter at step 2b (Reviewer)
+   - No commits and no feedback entries → phase is **not started**, enter at step 2a (Implementer)
+
+A phase is only skip-eligible when feedback.md contains a `PHASE_APPROVED` record for it. Implementation commits alone are not sufficient.
+
+Report the recovered state to the user before continuing:
+```
+Resume state for $ARGUMENTS:
+- Phase 1: [done | needs review | needs review fixes | needs implementation | not started]
+- Phase 2: [...]
+Continuing from Phase N...
+```
 
 ### For each Phase-N:
 
