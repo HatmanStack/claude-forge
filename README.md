@@ -31,7 +31,7 @@ Requires [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI and a
 | Skill | Purpose | Output | Next Step |
 |-------|---------|--------|-----------|
 | `/brainstorm` | Interactive design session — explores codebase, asks scoping questions | `brainstorm.md` | `/pipeline` |
-| `/repo-eval` | 3-evaluator hiring panel scoring 12 pillars | `eval.md` | `/pipeline` |
+| `/repo-eval` | 3-evaluator panel scoring 12 pillars | `eval.md` | `/pipeline` |
 | `/repo-health` | Technical debt audit across 4 vectors | `health-audit.md` | `/pipeline` |
 | `/doc-health` | Documentation drift detection across 6 phases | `doc-audit.md` | `/pipeline` |
 | `/pipeline` | Automated build/remediation cycle — routes by intake doc type | Committed code | Done |
