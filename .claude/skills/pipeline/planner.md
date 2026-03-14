@@ -57,9 +57,12 @@ Create implementation plan files in markdown format using the **Write** tool.
    +----------------------------------------------------------+
 ```
 
-**Token Strategy:**
-* Aim for **~50k tokens per phase** (fits in one context window)
-* If a phase is significantly less, combine with adjacent phases
+**Token Strategy (Guideline, not hard target):**
+* **~50k tokens per phase** is the target for large features (fits in one context window)
+* For smaller scopes (remediation, cleanup, simple features): phases can be much smaller — size to the work, not the budget
+* Only split into multiple phases when the work genuinely exceeds a single context window
+* A single-phase plan is fine if the scope fits
+* Hard limits: no phase should exceed ~75k tokens (context pressure risk)
 * Plan should be **branch agnostic**
 
 ### Files to Create

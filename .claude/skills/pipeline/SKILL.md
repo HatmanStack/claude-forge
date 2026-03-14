@@ -1,7 +1,7 @@
 ---
 name: pipeline
-description: Run the adversarial plan-implement-review pipeline. Spawns agents for each role with their own context windows. Use after /brainstorm has produced a design spec.
-allowed-tools: Agent, Read, Glob, Grep, Bash, Edit
+description: Run the adversarial plan-implement-review pipeline. Spawns agents for each role with their own context windows. Use after /brainstorm, /repo-eval, /repo-health, or /doc-health has produced a starting doc.
+allowed-tools: Agent, Read, Write, Glob, Grep, Bash, Edit
 ---
 
 # Pipeline Orchestrator
@@ -12,13 +12,32 @@ You coordinate the adversarial development pipeline. Each role runs as a separat
 
 ## Input
 
-`$ARGUMENTS` is the plan identifier in `YYYY-MM-DD-feature-slug` format (e.g., `2026-03-12-user-auth`). The brainstorm doc and plan files live at `docs/plans/$ARGUMENTS/`.
+`$ARGUMENTS` is the plan identifier in `YYYY-MM-DD-slug` format (e.g., `2026-03-12-user-auth`). Plan files live at `docs/plans/$ARGUMENTS/`.
 
-## Pre-Flight
+## Pre-Flight & Type Detection
 
-1. Verify `docs/plans/$ARGUMENTS/brainstorm.md` exists — if not, tell the user to run `/brainstorm` first
-2. **Read** the brainstorm doc to understand the feature scope
-3. **Read** `pipeline-protocol.md` to load the signal protocol
+1. **Read** `pipeline-protocol.md` to load the signal protocol
+2. Detect pipeline type by checking which intake document exists at `docs/plans/$ARGUMENTS/`:
+
+```text
++-------------------------------------------------------------------+
+|                    PIPELINE TYPE ROUTING                           |
++-------------------------------------------------------------------+
+|                                                                   |
+|  brainstorm.md exists?    → type: feature (default flow below)    |
+|  eval.md exists?          → type: repo-eval                       |
+|  health-audit.md exists?  → type: repo-health                     |
+|  doc-audit.md exists?     → type: doc-health                      |
+|  none found?              → tell user to run an intake skill      |
+|                                                                   |
++-------------------------------------------------------------------+
+```
+
+Each pipeline type uses a distinct intake filename — no frontmatter parsing needed for routing.
+
+3. **Read** the intake document to understand the scope
+4. **If type is NOT `feature`**: **Read** the corresponding flow file from `flows/` and follow those instructions instead of the stages below. The flow file defines all stages, agent spawning, and completion criteria for that pipeline type. **Stop reading this file and follow the flow file.**
+5. **If type IS `feature`** (brainstorm.md): continue with the stages below
 
 ## Stage 0: Pipeline State Recovery
 
@@ -298,6 +317,13 @@ A) Address the issues and re-run: /pipeline $ARGUMENTS
 B) Review feedback manually: read docs/plans/$ARGUMENTS/feedback.md
 C) Ship with caveats (if issues are minor)
 ```
+
+**NO-GO Re-Entry Path:** When the user re-runs `/pipeline $ARGUMENTS` after a NO-GO, the State Recovery (Stage 0) detects the `NO-GO` in feedback.md and routes rework based on the final reviewer's categorization:
+- **Plan-level issues** (architecture flaw, missing phase): Re-enter at Stage 1 (Planner) with revision instructions referencing the `FINAL_REVIEW` feedback
+- **Implementation-level issues** (bug, missing test, security): Re-enter at Stage 2 at the affected phase(s), spawning the Implementer with `FINAL_REVIEW` feedback items as `CODE_REVIEW` rework
+- **Mixed issues**: Plan-level first, then implementation-level
+
+The orchestrator should update the `NO-GO` status in feedback.md to `REWORK_IN_PROGRESS` to distinguish active rework from a fresh pipeline run.
 
 ### On Max Iterations Reached:
 
