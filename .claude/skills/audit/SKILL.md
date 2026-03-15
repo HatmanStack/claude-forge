@@ -18,7 +18,7 @@ You coordinate one or more codebase audits. All scoping questions are asked upfr
 
 Present **one message** with all questions. The user answers everything at once, then you execute.
 
-```
+```text
 Which audits should I run?
 
 A) All three (health → eval → docs)
@@ -92,7 +92,7 @@ All auditor/evaluator agents are read-only — they explore the codebase but don
 ```
 
 **Agent 1: Health Auditor** (if health selected)
-```
+```xml
 <role_prompt>
 [Contents of health-auditor.md]
 </role_prompt>
@@ -107,7 +107,7 @@ Constraints: [from Step 1]
 ```
 
 **Agent 2: Eval — The Pragmatist** (if eval selected)
-```
+```xml
 <role_prompt>
 [Contents of eval-hire.md]
 </role_prompt>
@@ -121,7 +121,7 @@ Exclusions: [from Step 1]
 ```
 
 **Agent 3: Eval — The Oncall Engineer** (if eval selected)
-```
+```xml
 <role_prompt>
 [Contents of eval-stress.md]
 </role_prompt>
@@ -135,7 +135,7 @@ Exclusions: [from Step 1]
 ```
 
 **Agent 4: Eval — The Team Lead** (if eval selected)
-```
+```xml
 <role_prompt>
 [Contents of eval-day2.md]
 </role_prompt>
@@ -149,7 +149,7 @@ Exclusions: [from Step 1]
 ```
 
 **Agent 5: Doc Auditor** (if docs selected)
-```
+```xml
 <role_prompt>
 [Contents of doc-auditor.md]
 </role_prompt>
@@ -173,7 +173,7 @@ See the individual intake skill SKILL.md files (repo-health, repo-eval, doc-heal
 
 ### Step 6: Handoff
 
-```
+```text
 Audit complete: docs/plans/YYYY-MM-DD-audit-slug/
 
 Intake docs produced:
