@@ -130,15 +130,16 @@ Phases target ~50k tokens for large features (fits in one agent context window).
 
 ## Combined Audits
 
-The `/audit` skill runs multiple audits sequentially and produces all intake docs in a single directory. A single `/pipeline` command then detects which intake docs exist and runs the corresponding flows in order:
+The `/audit` skill runs multiple audits and produces all intake docs in a single directory. Auditor agents (up to 5) run in parallel since they're read-only. A single `/pipeline` command then detects the multiple intake docs and creates ONE unified plan with phases tagged by implementer type.
 
-1. **Repo Health** (clean first — subtractive work improves subsequent scores)
-2. **Repo Eval** (score the clean code)
-3. **Doc Health** (fix docs last — reflects the final code state)
+This is a merged-plan model, not sequential independent flows. The planner reads all audit findings together and creates phases ordered by work type:
 
-This ordering is deliberate: health cleanup removes dead code and tightens error handling, which directly improves eval pillar scores. Doc fixes should describe the code as it exists after all other changes.
+1. `[HYGIENIST]` phases first — subtractive cleanup improves subsequent scores
+2. `[IMPLEMENTER]` phases next — structural/code fixes on clean code
+3. `[FORTIFIER]` phases next — lock in the clean state with guardrails
+4. `[DOC-ENGINEER]` phases last — docs reflect the final code state
 
-The pipeline reports between flows and each flow runs to its own completion gate before the next begins.
+Each phase tag routes to the correct implementer/reviewer pair. Re-evaluation runs all applicable gates in parallel at the end (eval scores, health findings, doc drift).
 
 ## Exit Gates
 
@@ -146,7 +147,7 @@ Each pipeline type has a different completion criteria:
 
 | Pipeline | Exit Gate | Rationale |
 |----------|-----------|-----------|
-| Feature | Final Reviewer GO/NO-GO | Holistic integration review |
+| Feature | Final Reviewer GO/NO-GO | Holistic integration review (only flow with Final Reviewer) |
 | Repo-Eval | All pillars ≥ threshold (default 9/10) | Re-evaluation IS the final gate |
 | Repo-Health | All CRITICAL/HIGH findings resolved | Tech debt is continuous; MEDIUM/LOW acceptable |
 | Doc-Health | All DRIFT/STALE/BROKEN findings resolved | Docs either match code or they don't |

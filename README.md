@@ -48,11 +48,9 @@ Requires [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI and a
 /audit all
 /pipeline 2026-03-15-audit-my-app
 
-# Or run individual audits
+# Or run individual audits (each creates its own plan directory)
 /repo-eval
-/repo-health
-/doc-health
-/pipeline 2026-03-15-audit-my-app
+/pipeline 2026-03-15-eval-my-app
 ```
 
 Resume any interrupted pipeline by re-running `/pipeline` with the same slug.
@@ -115,6 +113,7 @@ Doc Auditor → Planner ↔ Plan Reviewer → Doc Engineer ↔ Doc Reviewer → 
     ├── doc-engineer.md             # Fix docs + add prevention
     ├── doc-reviewer.md             # Reviews doc changes
     └── flows/
+        ├── audit-flow.md            # Unified plan across multiple audit types
         ├── repo-eval-flow.md
         ├── repo-health-flow.md
         └── doc-health-flow.md
