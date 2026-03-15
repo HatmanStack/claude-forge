@@ -111,14 +111,14 @@ Loop until `PLAN_APPROVED` or max iterations.
 
 Process phases sequentially. The orchestrator determines which implementer role to use based on the phase title tag:
 
-### For [HYGIENIST] phases:
+### For [HYGIENIST] phases
 
 - **Read** `health-hygienist.md` for the role prompt
 - Spawn implementer agent with hygienist role prompt
 - After implementation, spawn **Health Reviewer** (`health-reviewer.md`) for review
 - Loop until `PHASE_APPROVED` or max iterations
 
-### For [FORTIFIER] phases:
+### For [FORTIFIER] phases
 
 - **Read** `health-fortifier.md` for the role prompt
 - Spawn implementer agent with fortifier role prompt
