@@ -128,6 +128,18 @@ Every reviewer checks against Phase-0. This prevents drift across phases (e.g., 
 
 Phases target ~50k tokens for large features (fits in one agent context window). For smaller scopes (remediation, cleanup), phases can be much smaller — the planner sizes to the work, not the budget. Hard ceiling: 75k tokens per phase to avoid context pressure.
 
+## Combined Audits
+
+The `/audit` skill runs multiple audits sequentially and produces all intake docs in a single directory. A single `/pipeline` command then detects which intake docs exist and runs the corresponding flows in order:
+
+1. **Repo Health** (clean first — subtractive work improves subsequent scores)
+2. **Repo Eval** (score the clean code)
+3. **Doc Health** (fix docs last — reflects the final code state)
+
+This ordering is deliberate: health cleanup removes dead code and tightens error handling, which directly improves eval pillar scores. Doc fixes should describe the code as it exists after all other changes.
+
+The pipeline reports between flows and each flow runs to its own completion gate before the next begins.
+
 ## Exit Gates
 
 Each pipeline type has a different completion criteria:

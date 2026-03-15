@@ -31,6 +31,7 @@ Requires [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI and a
 | Skill | Purpose | Output | Next Step |
 |-------|---------|--------|-----------|
 | `/brainstorm` | Interactive design session — explores codebase, asks scoping questions | `brainstorm.md` | `/pipeline` |
+| `/audit` | Combined audit runner — select any combination of eval, health, docs | Multiple intake docs | `/pipeline` |
 | `/repo-eval` | 3-evaluator panel scoring 12 pillars | `eval.md` | `/pipeline` |
 | `/repo-health` | Technical debt audit across 4 vectors | `health-audit.md` | `/pipeline` |
 | `/doc-health` | Documentation drift detection across 6 phases | `doc-audit.md` | `/pipeline` |
@@ -43,17 +44,15 @@ Requires [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI and a
 /brainstorm I want to add webhook support for payment events
 /pipeline 2026-03-12-payment-webhooks
 
-# Codebase evaluation (remediate until all 12 pillars hit 9/10)
+# Full audit (health → eval → docs) with one pipeline run
+/audit all
+/pipeline 2026-03-15-audit-my-app
+
+# Or run individual audits
 /repo-eval
-/pipeline 2026-03-14-eval-my-app
-
-# Technical debt cleanup
 /repo-health
-/pipeline 2026-03-14-health-my-app
-
-# Documentation fixes
 /doc-health
-/pipeline 2026-03-14-docs-my-app
+/pipeline 2026-03-15-audit-my-app
 ```
 
 Resume any interrupted pipeline by re-running `/pipeline` with the same slug.
@@ -92,6 +91,7 @@ Doc Auditor → Planner ↔ Plan Reviewer → Doc Engineer ↔ Doc Reviewer → 
 
 ```
 .claude/skills/
+├── audit/SKILL.md                  # Combined audit runner
 ├── brainstorm/SKILL.md
 ├── repo-eval/SKILL.md
 ├── repo-health/SKILL.md
