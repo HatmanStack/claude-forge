@@ -171,7 +171,7 @@ Resume state for $ARGUMENTS:
 Continuing from Phase N...
 ```
 
-### For each Phase-N:
+### For each Phase-N
 
 #### 2a: Spawn Implementer
 
