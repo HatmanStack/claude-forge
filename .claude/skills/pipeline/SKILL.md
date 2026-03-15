@@ -27,17 +27,11 @@ You coordinate the adversarial development pipeline. Each role runs as a separat
 |  Check which intake docs exist at docs/plans/$ARGUMENTS/:         |
 |                                                                   |
 |  brainstorm.md exists?    → type: feature (default flow below)    |
-|  health-audit.md exists?  → type: repo-health                     |
-|  eval.md exists?          → type: repo-eval                       |
-|  doc-audit.md exists?     → type: doc-health                      |
+|  Multiple audit docs?     → type: audit (unified plan)            |
+|  health-audit.md only?    → type: repo-health                     |
+|  eval.md only?            → type: repo-eval                       |
+|  doc-audit.md only?       → type: doc-health                      |
 |  none found?              → tell user to run an intake skill      |
-|                                                                   |
-|  MULTI-FLOW: If multiple intake docs exist, run flows             |
-|  sequentially in this order:                                      |
-|    1. repo-health  (clean first)                                  |
-|    2. repo-eval    (score the clean code)                          |
-|    3. doc-health   (fix docs last, reflects final code)            |
-|  Feature flow (brainstorm.md) always runs alone.                  |
 |                                                                   |
 +-------------------------------------------------------------------+
 ```
@@ -46,16 +40,7 @@ Each pipeline type uses a distinct intake filename — no frontmatter parsing ne
 
 3. **Glob** for all intake docs at `docs/plans/$ARGUMENTS/` to determine which exist
 4. **If `brainstorm.md` exists**: it runs alone — continue with the feature flow stages below
-5. **If multiple non-feature intake docs exist**: build an ordered queue of flows to run:
-   - `health-audit.md` → read `flows/repo-health-flow.md` and execute it fully
-   - `eval.md` → read `flows/repo-eval-flow.md` and execute it fully
-   - `doc-audit.md` → read `flows/doc-health-flow.md` and execute it fully
-   - Run each flow to completion before starting the next. Report between flows:
-   ```
-   Flow complete: repo-health
-   Next flow: repo-eval
-   Starting...
-   ```
+5. **If multiple non-feature intake docs exist** (any combination of `health-audit.md`, `eval.md`, `doc-audit.md`): **Read** `flows/audit-flow.md` and follow it. This creates ONE unified plan across all audit types. **Stop reading this file and follow the flow file.**
 6. **If exactly one non-feature intake doc exists**: read the corresponding flow file and follow it. **Stop reading this file and follow the flow file.**
 7. **If none found**: tell the user to run an intake skill first
 
