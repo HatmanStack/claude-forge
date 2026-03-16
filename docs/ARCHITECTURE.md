@@ -148,11 +148,11 @@ Each pipeline type has a different completion criteria:
 | Pipeline | Exit Gate | Rationale |
 |----------|-----------|-----------|
 | Feature | Final Reviewer GO/NO-GO | Holistic integration review (only flow with Final Reviewer) |
-| Repo-Eval | All pillars ≥ threshold (default 9/10) | Re-evaluation IS the final gate |
-| Repo-Health | All CRITICAL/HIGH findings resolved | Tech debt is continuous; MEDIUM/LOW acceptable |
-| Doc-Health | All DRIFT/STALE/BROKEN findings resolved | Docs either match code or they don't |
+| Repo-Eval | Verification spot-check of remediation targets | One reviewer agent checks specific file:line findings |
+| Repo-Health | Verification of CRITICAL/HIGH findings | One reviewer agent checks specific file:line findings; MEDIUM/LOW acceptable to carry |
+| Doc-Health | Verification of DRIFT/STALE/BROKEN findings | One reviewer agent checks specific doc:code pairs |
 
-Re-evaluation cycles: repo-eval allows 3 (scores improve incrementally), health and doc allow 2 (fixes are deterministic — if they persist after 2 cycles, human judgment is needed).
+Evaluator and auditor agents run exactly once (during intake). The verification stage uses the existing code reviewer with a targeted prompt — one agent spot-checking specific findings instead of 3-5 agents re-scanning the entire codebase. Max 2 verification cycles before surfacing to user.
 
 ## State Recovery
 

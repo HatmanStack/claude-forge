@@ -53,7 +53,7 @@ B) No — scan everything with fresh eyes
 
 The code evaluation runs 3 evaluator agents in parallel, each scoring 4 pillars (12 total). The scores calibrate to the role level you select.
 
-2. Role level — sets the scoring bar. A "Senior" evaluation expects production-hardened patterns; a "Junior" evaluation focuses on fundamentals.
+1. Role level — sets the scoring bar. A "Senior" evaluation expects production-hardened patterns; a "Junior" evaluation focuses on fundamentals.
 
 ```text
 What role level should I evaluate this codebase against?
@@ -64,7 +64,7 @@ C) Senior Developer — production: defensive coding, observability, performance
 D) Staff+ / Principal — systems: architectural coherence, scalability, operational excellence
 ```
 
-3. Focus areas — narrows what the evaluators pay extra attention to. They still score all 12 pillars regardless.
+1. Focus areas — narrows what the evaluators pay extra attention to. They still score all 12 pillars regardless.
 
 ```text
 Any specific concerns the evaluators should weight more heavily?
@@ -77,7 +77,7 @@ E) Multiple (tell me which)
 F) None — balanced evaluation across all pillars
 ```
 
-4. Scope and exclusions — what to evaluate and what to skip.
+1. Scope and exclusions — what to evaluate and what to skip.
 
 ```text
 What should the evaluators look at?
@@ -87,7 +87,7 @@ B) Full repo, no exclusions
 C) Specific directories only (tell me which to include or exclude)
 ```
 
-5. Pillar overrides — by default, the pipeline remediates until all 12 pillars hit 9/10. Some pillars (like Creativity) may not be improvable through code changes. Override lets you set a lower threshold or exclude a pillar from the remediation gate entirely.
+1. Pillar overrides — by default, the pipeline remediates until all 12 pillars hit 9/10. Some pillars (like Creativity) may not be improvable through code changes. Override lets you set a lower threshold or exclude a pillar from the remediation gate entirely.
 
 The 12 pillars are:
 - **Hire lens:** Problem-Solution Fit, Architecture, Code Quality, Creativity
@@ -105,7 +105,7 @@ B) Specific overrides (tell me which pillars and target scores, e.g., "Creativit
 
 The health audit scans for technical debt across 4 vectors: architectural, structural, operational, and code hygiene. Findings are prioritized by severity (CRITICAL > HIGH > MEDIUM > LOW). The pipeline remediates until all CRITICAL and HIGH findings are resolved.
 
-6. Goal — determines which debt vectors the auditor emphasizes.
+1. Goal — determines which debt vectors the auditor emphasizes.
 
 ```text
 What's the primary goal for this audit?
@@ -116,7 +116,7 @@ C) Onboarding prep — emphasize structural and hygiene debt (naming, dead code,
 D) Pre-release cleanup — focus on CRITICAL/HIGH items only, skip MEDIUM/LOW
 ```
 
-7. Deployment target — changes what "operational debt" means. A Lambda function has different concerns than a long-running container.
+1. Deployment target — changes what "operational debt" means. A Lambda function has different concerns than a long-running container.
 
 ```text
 What's the deployment target?
@@ -129,7 +129,7 @@ E) Multiple (tell me which)
 F) Not deployed yet / unsure
 ```
 
-8. Scope and constraints — what to audit and what's off-limits, in one question.
+1. Scope and constraints — what to audit and what's off-limits, in one question.
 
 ```text
 What should the health auditor cover, and is anything off-limits?
@@ -139,7 +139,7 @@ B) Full repo, but skip specific areas (tell me which — e.g., "don't touch the 
 C) Specific directories only (tell me which)
 ```
 
-9. Existing tooling — helps the fortifier (hardening phase) know what guardrails already exist so it doesn't duplicate work.
+1. Existing tooling — helps the fortifier (hardening phase) know what guardrails already exist so it doesn't duplicate work.
 
 ```text
 What development tooling is already in place?
@@ -153,7 +153,7 @@ C) None — no linting, CI, or hooks configured
 
 The doc audit runs 6 detection phases: discovery, comparison (drift/gaps/stale), code examples, link integrity, config/environment, and structure. It compares documentation claims against actual code behavior.
 
-10. Scope and constraints — what docs to audit and what's off-limits.
+1. Scope and constraints — what docs to audit and what's off-limits.
 
 ```text
 What documentation should I audit, and is anything off-limits?
@@ -164,7 +164,7 @@ C) Specific directories only (tell me which)
 D) README and API docs only
 ```
 
-11. Language stack — determines which auto-generation tools are available (typedoc for TS, sphinx for Python, swagger for REST APIs).
+1. Language stack — determines which auto-generation tools are available (typedoc for TS, sphinx for Python, swagger for REST APIs).
 
 ```text
 What's the primary language stack?
@@ -174,7 +174,7 @@ B) Python — sphinx, mkdocstrings available
 C) Both
 ```
 
-12. Prevention tooling — what automated checks to add so documentation drift becomes a CI failure instead of a periodic cleanup.
+1. Prevention tooling — what automated checks to add so documentation drift becomes a CI failure instead of a periodic cleanup.
 
 ```text
 What drift prevention tooling should I add after fixing the docs?
@@ -330,6 +330,7 @@ The pipeline will create one unified plan across all audit types.
 - **DO** ask follow-up questions one at a time, waiting for each answer
 - **DO NOT** prompt the user again after all questions are answered — run all agents autonomously
 - **DO NOT** start remediation — your only output is the intake docs
+- **DO NOT** re-run evaluator or auditor agents after writing the intake docs — they run exactly once during this skill. Re-evaluation happens later in `/pipeline` after all remediation is complete.
 - **DO** embed role prompt contents in agent prompts (agents cannot access skill directory files)
 - **DO** produce all intake docs in the same plan directory
 - **DO** report results after each audit completes
