@@ -67,22 +67,22 @@ Planner ↔ Plan Reviewer → Implementer ↔ Code Reviewer → Final Reviewer
 ### Repo Eval (`eval.md`)
 
 ```
-3 Evaluators → Planner ↔ Plan Reviewer → Implementer ↔ Reviewer → Re-Evaluate
-(parallel)     (max 3)                   (max 3/phase)             ↺ until all pillars ≥ threshold
+3 Evaluators → Planner ↔ Plan Reviewer → Implementer ↔ Reviewer → Verify
+(parallel)     (max 3)                   (max 3/phase)             spot-check findings
 ```
 
 ### Repo Health (`health-audit.md`)
 
 ```
-Auditor → Planner ↔ Plan Reviewer → Hygienist ↔ Health Reviewer → Fortifier ↔ Health Reviewer → Re-Audit
-                                     [cleanup]                      [guardrails]                   ↺ until CRITICAL/HIGH resolved
+Auditor → Planner ↔ Plan Reviewer → Hygienist ↔ Health Reviewer → Fortifier ↔ Health Reviewer → Verify
+                                     [cleanup]                      [guardrails]                   spot-check findings
 ```
 
 ### Doc Health (`doc-audit.md`)
 
 ```
-Doc Auditor → Planner ↔ Plan Reviewer → Doc Engineer ↔ Doc Reviewer → Re-Audit
-                                         [fix + prevent]               ↺ until drift resolved
+Doc Auditor → Planner ↔ Plan Reviewer → Doc Engineer ↔ Doc Reviewer → Verify
+                                         [fix + prevent]               spot-check findings
 ```
 
 ## File Structure

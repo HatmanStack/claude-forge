@@ -139,7 +139,7 @@ This is a merged-plan model, not sequential independent flows. The planner reads
 3. `[FORTIFIER]` phases next — lock in the clean state with guardrails
 4. `[DOC-ENGINEER]` phases last — docs reflect the final code state
 
-Each phase tag routes to the correct implementer/reviewer pair. Re-evaluation runs all applicable gates in parallel at the end (eval scores, health findings, doc drift).
+Each phase tag routes to the correct implementer/reviewer pair. A single verification agent spot-checks the original findings at the end.
 
 ## Exit Gates
 
