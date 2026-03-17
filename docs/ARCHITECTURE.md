@@ -139,7 +139,7 @@ This is a merged-plan model, not sequential independent flows. The planner reads
 3. `[FORTIFIER]` phases next — lock in the clean state with guardrails
 4. `[DOC-ENGINEER]` phases last — docs reflect the final code state
 
-Each phase tag routes to the correct implementer/reviewer pair. A single verification agent spot-checks the original findings at the end.
+Each phase tag routes to the correct implementer/reviewer pair. A single verification agent verifys the original findings at the end.
 
 ## Exit Gates
 
@@ -148,11 +148,11 @@ Each pipeline type has a different completion criteria:
 | Pipeline | Exit Gate | Rationale |
 |----------|-----------|-----------|
 | Feature | Final Reviewer GO/NO-GO | Holistic integration review (only flow with Final Reviewer) |
-| Repo-Eval | Verification spot-check of remediation targets | One reviewer agent checks specific file:line findings |
+| Repo-Eval | Verification verify of remediation targets | One reviewer agent checks specific file:line findings |
 | Repo-Health | Verification of CRITICAL/HIGH findings | One reviewer agent checks specific file:line findings; MEDIUM/LOW acceptable to carry |
 | Doc-Health | Verification of DRIFT/STALE/BROKEN findings | One reviewer agent checks specific doc:code pairs |
 
-Evaluator and auditor agents run exactly once (during intake). The verification stage uses the existing code reviewer with a targeted prompt — one agent spot-checking specific findings instead of 3-5 agents re-scanning the entire codebase. Max 2 verification cycles before surfacing to user.
+Evaluator and auditor agents run exactly once (during intake). The verification stage uses the existing code reviewer with a targeted prompt — one agent verifying specific findings instead of 3-5 agents re-scanning the entire codebase. Max 2 verification cycles before surfacing to user.
 
 ## State Recovery
 

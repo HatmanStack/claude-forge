@@ -68,21 +68,21 @@ Planner ↔ Plan Reviewer → Implementer ↔ Code Reviewer → Final Reviewer
 
 ```
 3 Evaluators → Planner ↔ Plan Reviewer → Implementer ↔ Reviewer → Verify
-(parallel)     (max 3)                   (max 3/phase)             spot-check findings
+(parallel)     (max 3)                   (max 3/phase)             verify findings
 ```
 
 ### Repo Health (`health-audit.md`)
 
 ```
 Auditor → Planner ↔ Plan Reviewer → Hygienist ↔ Health Reviewer → Fortifier ↔ Health Reviewer → Verify
-                                     [cleanup]                      [guardrails]                   spot-check findings
+                                     [cleanup]                      [guardrails]                   verify findings
 ```
 
 ### Doc Health (`doc-audit.md`)
 
 ```
 Doc Auditor → Planner ↔ Plan Reviewer → Doc Engineer ↔ Doc Reviewer → Verify
-                                         [fix + prevent]               spot-check findings
+                                         [fix + prevent]               verify findings
 ```
 
 ## File Structure
