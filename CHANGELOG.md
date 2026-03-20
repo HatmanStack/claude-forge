@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Agent Reuse via SendMessage** — Planner, Plan Reviewer, Implementer, and Reviewer agents are spawned once and continued via `SendMessage` for subsequent iterations. Preserves context instead of re-reading codebase from scratch each iteration
 - **Strict Agent Spawning Rules** — One agent at a time, no duplicates, no per-phase planners, no background agents, no parallel agents in the pipeline orchestrator
+- **Orchestrator Never Runs CI** — Only agents run tests, linters, and builds within their own execution. Orchestrator only spawns agents, reads signals, and routes work. Prevents duplicate CI runs and race conditions
 - **Intake Questions** — Added "known pain points" (universal) and "deployment target" (health). Merged scope+constraints into single questions. Dropped redundant "context" question from eval
 - **Token Budget** — Changed from hard 50k target to flexible guideline. Planner sizes phases to the work; single-phase plans OK for small scopes
 - **Distinct Intake Filenames** — `health-audit.md` and `doc-audit.md` replace shared `audit.md`, eliminating frontmatter-based routing
