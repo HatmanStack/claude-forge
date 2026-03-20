@@ -57,6 +57,10 @@ Resume any interrupted pipeline by re-running `/pipeline` with the same slug.
 
 ## Pipeline Flows
 
+<p align="center">
+  <img src="arch.jpeg" alt="Claude Forge" width="700">
+</p>
+
 ### Feature (`brainstorm.md`)
 
 ```
