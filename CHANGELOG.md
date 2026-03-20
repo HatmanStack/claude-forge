@@ -5,6 +5,38 @@ All notable changes to Claude Forge will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-03-19
+
+### Added
+
+- **Combined Audit Skill** (`/audit`) — Single entry point to run any combination of eval, health, and doc audits. Asks scoping questions one at a time, spawns up to 5 agents in parallel, produces all intake docs in one directory for a single `/pipeline` run
+- **Unified Audit Flow** (`flows/audit-flow.md`) — Merged-plan model: one planner reads all intake docs and creates one plan with phases tagged `[HYGIENIST]`, `[IMPLEMENTER]`, `[FORTIFIER]`, `[DOC-ENGINEER]`. Tags route each phase to the correct implementer/reviewer pair
+- **Verification Stage** — Lightweight final gate replacing expensive re-evaluation. One reviewer agent verifies specific `file:line` findings from intake docs instead of re-running 3-5 evaluator/auditor agents
+- **Signal Validation** — Intake skills now validate completion signals (`EVAL_HIRE_COMPLETE`, `AUDIT_COMPLETE`, `DOC_AUDIT_COMPLETE`) before writing intake docs. Truncated agent output is detected and reported
+- **VERIFIED/UNVERIFIED Signals** — New pipeline signals persisted to feedback.md for state recovery across interruptions
+- **Per-Pillar Threshold Overrides** — Users can set custom thresholds or exclude specific pillars from the remediation gate
+- **Cross-Evaluator Calibration** — Normalizes scores across evaluator lenses before planning; divergences ≥3 points flagged as signal
+
+### Changed
+
+- **Agent Reuse via SendMessage** — Planner, Plan Reviewer, Implementer, and Reviewer agents are spawned once and continued via `SendMessage` for subsequent iterations. Preserves context instead of re-reading codebase from scratch each iteration
+- **Strict Agent Spawning Rules** — One agent at a time, no duplicates, no per-phase planners, no background agents, no parallel agents in the pipeline orchestrator
+- **Intake Questions** — Added "known pain points" (universal) and "deployment target" (health). Merged scope+constraints into single questions. Dropped redundant "context" question from eval
+- **Token Budget** — Changed from hard 50k target to flexible guideline. Planner sizes phases to the work; single-phase plans OK for small scopes
+- **Distinct Intake Filenames** — `health-audit.md` and `doc-audit.md` replace shared `audit.md`, eliminating frontmatter-based routing
+- **Pipeline Protocol** — Updated signal table with VERIFIED/UNVERIFIED and all intake completion signals. Updated file ownership table with intake docs
+- **NO-GO Rollback Path** — Documented re-entry routing: plan-level issues go to Planner, implementation-level to affected Implementer
+
+### Fixed
+
+- Stale re-evaluation/re-audit references removed from all role prompts and flow files
+- Flow diagram labels updated from "Re-Audit"/"Re-Evaluate" to "Verify"
+- State recovery ordering: VERIFIED checked before PHASE_APPROVED-for-all-phases
+- feedback.md creation guaranteed before any stage (orchestrator creates if missing)
+- audit-flow pre-flight no longer validates evaluator/auditor files (intake-only)
+- doc-health template removed stale `ci_platform` field
+- Grep pattern regression fixed: `def\b`/`class\b` word boundaries instead of trailing-space code spans
+
 ## [1.1.0] - 2026-03-14
 
 ### Added
