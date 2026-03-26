@@ -16,13 +16,17 @@ Adversarial multi-agent pipeline for Claude Code. Separate AI agents generate an
 
 ## Install
 
+**Plugin** (marketplace):
 ```bash
-# From the plugin marketplace (inside Claude Code)
-/plugin install claude-forge
-
-# Or install directly from GitHub
 /plugin marketplace add hatmanstack/claude-forge
-/plugin install claude-forge@claude-forge
+/plugin install forge@claude-forge
+```
+
+**Standalone** (copy into any project):
+```bash
+cp -r skills/ /path/to/your-project/.claude/skills/
+# Or personal (all projects)
+cp -r skills/ ~/.claude/skills/
 ```
 
 Requires [Claude Code](https://docs.anthropic.com/en/docs/claude-code) v1.0.33+ and a git-initialized project.
@@ -31,30 +35,33 @@ Requires [Claude Code](https://docs.anthropic.com/en/docs/claude-code) v1.0.33+ 
 
 | Skill | Purpose | Output | Next Step |
 |-------|---------|--------|-----------|
-| `/claude-forge:brainstorm` | Interactive design session, explores codebase, asks scoping questions | `brainstorm.md` | `/claude-forge:pipeline` |
-| `/claude-forge:audit` | Combined audit runner, select any combination of eval, health, docs | Multiple intake docs | `/claude-forge:pipeline` |
-| `/claude-forge:repo-eval` | 3-evaluator panel scoring 12 pillars | `eval.md` | `/claude-forge:pipeline` |
-| `/claude-forge:repo-health` | Technical debt audit across 4 vectors | `health-audit.md` | `/claude-forge:pipeline` |
-| `/claude-forge:doc-health` | Documentation drift detection across 6 phases | `doc-audit.md` | `/claude-forge:pipeline` |
-| `/claude-forge:pipeline` | Automated build/remediation cycle, routes by intake doc type | Committed code | Done |
+| `brainstorm` | Interactive design session, explores codebase, asks scoping questions | `brainstorm.md` | `pipeline` |
+| `audit` | Combined audit runner, select any combination of eval, health, docs | Multiple intake docs | `pipeline` |
+| `repo-eval` | 3-evaluator panel scoring 12 pillars | `eval.md` | `pipeline` |
+| `repo-health` | Technical debt audit across 4 vectors | `health-audit.md` | `pipeline` |
+| `doc-health` | Documentation drift detection across 6 phases | `doc-audit.md` | `pipeline` |
+| `pipeline` | Automated build/remediation cycle, routes by intake doc type | Committed code | Done |
+
+> Plugin install: `/forge:brainstorm`, `/forge:pipeline`, etc.
+> Standalone install: `/brainstorm`, `/pipeline`, etc.
 
 ### Usage
 
 ```bash
 # Feature development
-/claude-forge:brainstorm I want to add webhook support for payment events
-/claude-forge:pipeline 2026-03-12-payment-webhooks
+/brainstorm I want to add webhook support for payment events
+/pipeline 2026-03-12-payment-webhooks
 
 # Full audit (health > eval > docs) with one pipeline run
-/claude-forge:audit all
-/claude-forge:pipeline 2026-03-15-audit-my-app
+/audit all
+/pipeline 2026-03-15-audit-my-app
 
 # Or run individual audits (each creates its own plan directory)
-/claude-forge:repo-eval
-/claude-forge:pipeline 2026-03-15-eval-my-app
+/repo-eval
+/pipeline 2026-03-15-eval-my-app
 ```
 
-Resume any interrupted pipeline by re-running `/claude-forge:pipeline` with the same slug.
+Resume any interrupted pipeline by re-running `/pipeline` with the same slug.
 
 ## Pipeline Flows
 
