@@ -205,7 +205,22 @@ pillar_overrides:
 3. Overlapping findings consolidated]
 ```
 
-### Step 5: Handoff
+### Step 5: Log to Manifest
+
+Append an entry to `.claude/skill-runs.json` in the repo root. If the file does not exist, create it with an empty array first.
+
+```json
+{
+  "skill": "repo-eval",
+  "date": "YYYY-MM-DD",
+  "plan": "YYYY-MM-DD-eval-slug"
+}
+```
+
+- Read the existing file, parse the JSON array, append the new entry, and write it back
+- If the file is malformed, overwrite it with a fresh array containing only the new entry
+
+### Step 6: Handoff
 
 ```text
 Evaluation complete: docs/plans/YYYY-MM-DD-eval-slug/eval.md

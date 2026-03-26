@@ -139,7 +139,22 @@ goal: [from Step 1]
 [Tool output summaries from knip/vulture, npm audit/pip-audit, etc.]
 ```
 
-### Step 5: Handoff
+### Step 5: Log to Manifest
+
+Append an entry to `.claude/skill-runs.json` in the repo root. If the file does not exist, create it with an empty array first.
+
+```json
+{
+  "skill": "repo-health",
+  "date": "YYYY-MM-DD",
+  "plan": "YYYY-MM-DD-health-slug"
+}
+```
+
+- Read the existing file, parse the JSON array, append the new entry, and write it back
+- If the file is malformed, overwrite it with a fresh array containing only the new entry
+
+### Step 6: Handoff
 
 ```text
 Audit complete: docs/plans/YYYY-MM-DD-health-slug/health-audit.md
