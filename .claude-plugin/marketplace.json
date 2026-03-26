@@ -1,0 +1,20 @@
+{
+  "name": "claude-forge",
+  "owner": {
+    "name": "HatmanStack"
+  },
+  "metadata": {
+    "description": "Adversarial multi-agent pipeline for Claude Code using GAN-style feedback loops"
+  },
+  "plugins": [
+    {
+      "name": "forge",
+      "source": ".",
+      "description": "Adversarial multi-agent pipeline for Claude Code. GAN-style loops where generators produce artifacts, discriminators validate them, and feedback drives convergence.",
+      "version": "1.2.0",
+      "license": "MIT",
+      "keywords": ["pipeline", "multi-agent", "adversarial", "code-review", "audit", "evaluation"],
+      "category": "development"
+    }
+  ]
+}
