@@ -9,7 +9,10 @@
   "plugins": [
     {
       "name": "forge",
-      "source": ".",
+      "source": {
+        "source": "github",
+        "repo": "HatmanStack/claude-forge"
+      },
       "description": "Adversarial multi-agent pipeline for Claude Code. GAN-style loops where generators produce artifacts, discriminators validate them, and feedback drives convergence.",
       "version": "1.2.0",
       "license": "MIT",
