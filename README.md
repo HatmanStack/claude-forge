@@ -42,9 +42,6 @@ Requires [Claude Code](https://docs.anthropic.com/en/docs/claude-code) v1.0.33+ 
 | `doc-health` | Documentation drift detection across 6 phases | `doc-audit.md` | `pipeline` |
 | `pipeline` | Automated build/remediation cycle, routes by intake doc type | Committed code | Done |
 
-> Plugin install: `/forge:brainstorm`, `/forge:pipeline`, etc.
-> Standalone install: `/brainstorm`, `/pipeline`, etc.
-
 ### Usage
 
 ```bash
