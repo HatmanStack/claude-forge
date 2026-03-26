@@ -75,7 +75,7 @@ Create the directory.
 
 **You** (the orchestrator) must read the role prompt file and embed its contents in the agent's prompt. Agents cannot access skill directory files.
 
-1. **Read** `.claude/skills/pipeline/doc-auditor.md` — store contents as `AUDITOR_PROMPT`
+1. **Read** `skills/pipeline/doc-auditor.md` — store contents as `AUDITOR_PROMPT`
 2. Spawn an **Agent** with:
 
 ```xml
