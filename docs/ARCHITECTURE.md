@@ -187,6 +187,23 @@ docs/plans/
 
 Decoupled from release versions. Plans are audit artifacts committed to git — a record of what was designed, what feedback was given, and how it was resolved.
 
+## Skill Run Manifest
+
+Every skill logs a run entry to `.claude/skill-runs.json` in the target repo on completion. This provides a persistent record of when each skill was invoked, what it produced, and which plan directory it created. The file is a JSON array; if it does not exist, the skill creates it.
+
+Each entry varies by skill type:
+
+```json
+{"skill": "brainstorm", "date": "2026-03-12", "plan": "2026-03-12-payment-webhooks"}
+{"skill": "audit", "date": "2026-03-15", "plan": "2026-03-15-audit-slug", "audits": ["health", "eval", "docs"]}
+{"skill": "repo-eval", "date": "2026-03-15", "plan": "2026-03-15-eval-slug"}
+{"skill": "pipeline", "date": "2026-03-15", "plan": "2026-03-15-eval-slug", "type": "repo-eval", "verdict": "VERIFIED"}
+```
+
+The `pipeline` entry includes the detected pipeline type and final verdict. The `audit` entry records which audit types were selected. If the file is malformed, the skill overwrites it with a fresh array containing only the new entry.
+
+This log survives OS wipes (it lives in the repo, not a local config directory) and lets users track skill usage across projects over time.
+
 ## Safety Rails
 
 - Max 3 iterations per GAN loop before escalating to the user
