@@ -5,6 +5,19 @@ All notable changes to Claude Forge will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-03-26
+
+### Added
+
+- **Plugin Format** — Restructured repo as a Claude Code plugin with `.claude-plugin/plugin.json` manifest and `marketplace.json` for marketplace distribution. Install via `/plugin marketplace add hatmanstack/claude-forge`
+- **Skill Run Manifest** — Every skill logs a run entry to `.claude/skill-runs.json` on completion, tracking skill name, date, plan directory, and pipeline verdict across projects
+
+### Changed
+
+- **Skills Location** — Moved from `.claude/skills/` to `skills/` at repo root (plugin format requirement). All internal path references updated
+- **GAN Framing** — Replaced "applies GAN principles" and "GAN-style loops" with "adapts the adversarial feedback loop from GAN architecture" and "adversarial loops" throughout. Aligns repo language with external content (freeCodeCamp article, blog post)
+- **README** — Documents both plugin install (`/plugin install forge@claude-forge`) and standalone install (`cp -r skills/`). Updated file structure diagram
+
 ## [1.2.0] - 2026-03-19
 
 ### Added

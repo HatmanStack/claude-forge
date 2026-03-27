@@ -5,14 +5,14 @@
 <p align="center">
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
   <a href="https://docs.anthropic.com/en/docs/claude-code"><img src="https://img.shields.io/badge/Built%20for-Claude%20Code-blueviolet" alt="Built for Claude Code"></a>
-  <img src="https://img.shields.io/badge/Architecture-GAN--style-orange" alt="Architecture: GAN-style">
+  <img src="https://img.shields.io/badge/Architecture-GAN--inspired-orange" alt="Architecture: GAN-inspired">
 </p>
 
 <p align="center">
  <a href="https://portfolio.hatstack.fun/read/post/Claude-Forge">Blog Post</a> · <a href="docs/ARCHITECTURE.md">Architecture Deep Dive</a>
 </p>
 
-Adversarial multi-agent pipeline for Claude Code. Separate AI agents generate and critique each other's work in GAN-style loops — generators produce artifacts, discriminators validate them, feedback drives convergence. Each agent runs in its own context window with fresh perspective.
+Adversarial multi-agent pipeline for Claude Code. Separate AI agents generate and critique each other's work in adversarial feedback loops, where generators produce artifacts, discriminators validate them, and iteration drives convergence. Each agent runs in its own context window with fresh perspective.
 
 ## Install
 

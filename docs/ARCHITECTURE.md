@@ -2,9 +2,9 @@
 
 ## The GAN Analogy
 
-Claude Forge applies Generative Adversarial Network principles to software development. In ML, GANs pit a generator against a discriminator — the generator creates content, the discriminator evaluates it, and iterative feedback drives both to improve.
+Claude Forge adapts the adversarial feedback loop from GAN architecture. In ML, GANs pit a generator against a discriminator, where the generator creates content, the discriminator evaluates it, and iterative feedback drives both to improve.
 
-Here, the same principle applies to code:
+Claude Forge borrows that generator-discriminator structure for code:
 
 ```
 +----------+                    +--------------+
@@ -206,7 +206,7 @@ This log survives OS wipes (it lives in the repo, not a local config directory) 
 
 ## Safety Rails
 
-- Max 3 iterations per GAN loop before escalating to the user
+- Max 3 iterations per adversarial loop before escalating to the user
 - NO-GO stops the pipeline — no automatic retry
 - Reviewers cannot modify source code — only feedback.md
 - Plan documents are immutable once created (only Planner revises)
