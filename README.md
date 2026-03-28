@@ -18,9 +18,11 @@ Adversarial multi-agent pipeline for Claude Code. Separate AI agents generate an
 
 **Plugin** (marketplace):
 ```bash
-/plugin marketplace add hatmanstack/claude-forge
 /plugin install forge@claude-forge
 ```
+
+- install for the project
+- restart claude instance
 
 **Standalone** (copy into any project):
 ```bash
