@@ -33,6 +33,20 @@ cp -r skills/ ~/.claude/skills/
 
 Requires [Claude Code](https://docs.anthropic.com/en/docs/claude-code) v1.0.33+ and a git-initialized project.
 
+### Enable Agent Teams (Required)
+
+Claude Forge relies on the `Agent` and `SendMessage` tools for multi-agent orchestration. These now require an experimental feature flag.
+
+**Set the environment variable before launching Claude Code:**
+
+```bash
+export CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1
+```
+
+To make it permanent, add that line to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.) and restart your terminal.
+
+Without this flag, skills that spawn or communicate with sub-agents will fail.
+
 ## Skills
 
 | Skill | Purpose | Output | Next Step |

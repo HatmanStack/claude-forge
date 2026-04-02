@@ -214,6 +214,16 @@ This log survives OS wipes (it lives in the repo, not a local config directory) 
 - Role file validation before any agent is spawned
 - Write ownership enforced (orchestrator writes eval/audit docs, never agents)
 
+## Prerequisites
+
+Claude Forge's orchestrator uses the `Agent` tool to spawn sub-agents and `SendMessage` to continue conversations with existing agents across review iterations. These tools are gated behind an experimental feature flag:
+
+```bash
+export CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1
+```
+
+This must be set in the environment before launching Claude Code. Without it, agent spawning and message routing will fail, breaking all pipeline flows.
+
 ## Trade-offs
 
 - **Token cost:** Multiple agents reviewing each other's work can triple total token usage
