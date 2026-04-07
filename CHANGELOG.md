@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.3.2] - 2026-04-06
 
+### Added
+
+- **Dependabot Auto-Merge Workflow** — `.github/workflows/dependabot-auto-merge.yml` merges patch and minor dependency updates automatically after CI passes. Uses `dependabot/fetch-metadata@v2` with an `if:` condition on `update-type` to skip major updates, `gh pr checks --watch --required` to enforce CI gate, and `gh pr merge --auto --squash` for clean history
+
 ### Changed
 
 - **Planner Pre-Planning Context** — Planner agent now reads `CLAUDE.md`, `.claude/settings.local.json`, and relevant memory files before writing any plan. Extracted conventions (package manager, runtime, build/test/deploy commands, user preferences) are incorporated into Phase-0.md so the implementer inherits project context. Prevents plans that contradict established stack choices (e.g. using pip when the project uses uv)
