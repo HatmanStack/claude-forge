@@ -1,0 +1,27 @@
+{
+  "_comment": "Copy to .claude/settings.local.json to enable opt-in Jaeger tracing of subagent runs. Requires CLAUDE_FORGE_TRACING=1 in your shell and the opentelemetry Python packages installed. See README 'Tracing (optional)' for details.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PROJECT_DIR}/hooks/trace_subagents.py"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PROJECT_DIR}/hooks/trace_subagents.py"
+          }
+        ]
+      }
+    ]
+  }
+}

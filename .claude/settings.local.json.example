@@ -1,0 +1,47 @@
+{
+  "_comment": "Opt-in Jaeger tracing for Claude Forge. Prefer running bin/install-tracing.sh which writes a properly-resolved version of this file. Requires CLAUDE_FORGE_TRACING=1 in your shell and the opentelemetry Python packages installed. See README 'Tracing (optional)'.",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PROJECT_DIR}/hooks/trace_subagents.py"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PROJECT_DIR}/hooks/trace_subagents.py"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PROJECT_DIR}/hooks/trace_subagents.py"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PROJECT_DIR}/hooks/trace_subagents.py"
+          }
+        ]
+      }
+    ]
+  }
+}
