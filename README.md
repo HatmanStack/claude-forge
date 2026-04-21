@@ -116,6 +116,10 @@ Doc Auditor → Planner ↔ Plan Reviewer → Doc Engineer ↔ Doc Reviewer → 
 claude-forge/
 ├── .claude-plugin/
 │   └── plugin.json                 # Plugin manifest
+├── bin/
+│   └── install-tracing.sh          # Optional Jaeger/OpenTelemetry setup
+├── hooks/
+│   └── trace_subagents.py          # Tracing hook (installed via bin/install-tracing.sh)
 ├── skills/
 │   ├── audit/SKILL.md              # Combined audit runner
 │   ├── brainstorm/SKILL.md
@@ -153,34 +157,84 @@ claude-forge/
 
 ## Tracing (optional)
 
-Claude Forge ships an opt-in OpenTelemetry hook that emits a span per subagent invocation, parented to a per-session root span, so a `/pipeline` run shows up as a single trace in Jaeger.
+Claude Forge ships an opt-in OpenTelemetry hook that emits one span per subagent invocation, parented to a per-session root, so a `/pipeline` run shows up as a single trace in Jaeger with per-subagent token counts and durations.
 
-It is **off by default**. Without the env var (and without `opentelemetry` installed) the hook is a no-op and cannot break a tool call.
+It is **off by default**. Without `CLAUDE_FORGE_TRACING=1` the hook is a no-op and cannot break a tool call.
 
-To turn it on:
+### 1. Install Docker
 
-1. Run Jaeger (any backend speaking OTLP/gRPC on `:4317` works):
-   ```bash
-   docker run -d --name jaeger -p 16686:16686 -p 4317:4317 -p 4318:4318 \
-     jaegertracing/all-in-one:latest
-   ```
-2. Install the Python deps in whatever environment your shell uses:
-   ```bash
-   pip install opentelemetry-api opentelemetry-sdk \
-               opentelemetry-exporter-otlp-proto-grpc
-   ```
-3. Register the hook for your checkout (this file is gitignored):
-   ```bash
-   cp .claude/settings.local.json.example .claude/settings.local.json
-   ```
-4. Export the opt-in flag before launching Claude Code:
-   ```bash
-   export CLAUDE_FORGE_TRACING=1
-   # optional override
-   export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
-   ```
+Skip if you already have Docker.
 
-Open the Jaeger UI at <http://localhost:16686> and pick the `claude-forge` service. Unset `CLAUDE_FORGE_TRACING` (or delete `settings.local.json`) to disable.
+```bash
+sudo apt-get update
+sudo apt-get install -y ca-certificates curl
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+sudo apt-get update
+sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+sudo usermod -aG docker $USER
+newgrp docker
+```
+
+> Ubuntu users: replace both `linux/debian` URLs with `linux/ubuntu`.
+
+### 2. Run Jaeger v2
+
+```bash
+docker run -d --name jaeger --restart unless-stopped \
+  -p 16686:16686 -p 4317:4317 -p 4318:4318 \
+  jaegertracing/jaeger:latest
+```
+
+That gets you the UI at <http://localhost:16686> and OTLP/gRPC ingestion on `:4317`. Storage is in-memory — traces are lost on container restart, which is fine for local development.
+
+### 3. Install the tracing hook
+
+From a clone of this repo:
+
+```bash
+cd your-project   # the project where you'll run /pipeline
+bash /path/to/claude-forge/bin/install-tracing.sh
+```
+
+If you installed Claude Forge as a plugin (`/plugin install forge@claude-forge`), the script ships *inside* the plugin install directory. Locate and run it the same way:
+
+```bash
+cd your-project
+bash "$(find ~/.claude -path '*/forge*' -name install-tracing.sh 2>/dev/null | head -1)"
+```
+
+The script:
+- Creates a dedicated venv at `~/.local/share/claude-forge/venv` (uses [`uv`](https://astral.sh/uv) if installed, otherwise `python3 -m venv`)
+- Installs `opentelemetry-api`, `opentelemetry-sdk`, `opentelemetry-exporter-otlp-proto-grpc` into that venv
+- Copies the hook to `~/.local/share/claude-forge/trace_subagents.py`
+- Merges hook entries into `./.claude/settings.local.json` (preserves any existing keys)
+- Self-tests: runs the hook end-to-end and probes the OTLP endpoint
+
+Flags: `--no-settings` (install only, print snippet), `--uninstall` (remove the venv + hook).
+
+### 4. Opt in
+
+Add to your shell init (`~/.bashrc`, `~/.zshrc`, etc.) and restart your terminal:
+
+```bash
+export CLAUDE_FORGE_TRACING=1
+# optional override; defaults to http://localhost:4317
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
+```
+
+Restart Claude Code from that shell, run `/pipeline`, then open <http://localhost:16686> and pick the `claude-forge` service. To disable, unset the env var (or run `bash bin/install-tracing.sh --uninstall`).
+
+### Other tracing knobs
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `CLAUDE_FORGE_TRACING` | unset | Master on/off — hook is a no-op without this |
+| `CLAUDE_FORGE_TRACE_INNER` | unset | Opt in to child spans for Read/Edit/Bash/etc. inside each subagent (off by default to keep traces readable) |
+| `CLAUDE_FORGE_TRACE_TOOL_BLOCKLIST` | `Read,Glob,Grep,TodoWrite,NotebookRead` | When inner tracing is on, comma-separated tools to skip. Empty string disables the blocklist |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4317` | OTLP/gRPC endpoint for any backend (Jaeger, Tempo, Honeycomb, etc.) |
 
 ## License
 
