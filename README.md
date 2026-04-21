@@ -151,6 +151,37 @@ claude-forge/
 └── LICENSE
 ```
 
+## Tracing (optional)
+
+Claude Forge ships an opt-in OpenTelemetry hook that emits a span per subagent invocation, parented to a per-session root span, so a `/pipeline` run shows up as a single trace in Jaeger.
+
+It is **off by default**. Without the env var (and without `opentelemetry` installed) the hook is a no-op and cannot break a tool call.
+
+To turn it on:
+
+1. Run Jaeger (any backend speaking OTLP/gRPC on `:4317` works):
+   ```bash
+   docker run -d --name jaeger -p 16686:16686 -p 4317:4317 -p 4318:4318 \
+     jaegertracing/all-in-one:latest
+   ```
+2. Install the Python deps in whatever environment your shell uses:
+   ```bash
+   pip install opentelemetry-api opentelemetry-sdk \
+               opentelemetry-exporter-otlp-proto-grpc
+   ```
+3. Register the hook for your checkout (this file is gitignored):
+   ```bash
+   cp .claude/settings.local.json.example .claude/settings.local.json
+   ```
+4. Export the opt-in flag before launching Claude Code:
+   ```bash
+   export CLAUDE_FORGE_TRACING=1
+   # optional override
+   export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
+   ```
+
+Open the Jaeger UI at <http://localhost:16686> and pick the `claude-forge` service. Unset `CLAUDE_FORGE_TRACING` (or delete `settings.local.json`) to disable.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
