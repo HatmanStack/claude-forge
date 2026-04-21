@@ -18,11 +18,14 @@ Adversarial multi-agent pipeline for Claude Code. Separate AI agents generate an
 
 **Plugin** (marketplace):
 ```bash
+/plugin marketplace add hatmanstack/claude-forge
 /plugin install forge@claude-forge
+/reload-plugins
 ```
 
-- install for the project
-- restart claude instance
+The first command registers the marketplace (persisted to `~/.claude/plugins/known_marketplaces.json`, so you only do it once). The second opens the install TUI — select a scope and confirm. The third activates the plugin in your current session.
+
+When installed as a plugin, skills are prefixed with `forge:` — e.g. `/forge:pipeline`, `/forge:brainstorm`. The unprefixed forms (`/pipeline`, etc.) shown in the usage examples below apply to the standalone install path.
 
 **Standalone** (copy into any project):
 ```bash

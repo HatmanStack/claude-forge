@@ -5,6 +5,24 @@ All notable changes to Claude Forge will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-04-21
+
+### Added
+
+- **Jaeger Tracing for Subagents** — `hooks/trace_subagents.py` emits OpenTelemetry spans for every agent/tool invocation, producing a parent/child trace tree viewable in Jaeger. Gated by `CLAUDE_FORGE_TRACING=1`, with `CLAUDE_FORGE_TRACE_INNER` to toggle inner-tool spans
+- **Tracing Installer** (`bin/install-tracing.sh`) — One-shot script that provisions the hook, writes `settings.local.json` entries, and (optionally) starts a local `jaegertracing/jaeger:latest` container. README documents setup, env vars, and the Jaeger UI workflow
+- **Planner Deep-Analysis Step** — `skills/pipeline/planner.md` now runs an explicit deep-analysis pass before drafting phases, surfacing cross-cutting risks and dependencies that were previously implicit
+
+### Changed
+
+- **Supply-Chain Hardening** — All third-party GitHub Actions SHA-pinned across `release.yml` and `dependabot-auto-merge.yml`. Dependabot given a 3-day cooldown on `github-actions` updates so compromised releases have time to be caught before adoption
+
+### Fixed
+
+- **Plugin Install** — Corrected `.claude-plugin/marketplace.json` source so `/plugin install forge@claude-forge` resolves the plugin correctly
+- **Tracing Hook Review Findings** — `_env_truthy()` allowlist stops `CLAUDE_FORGE_TRACE_INNER=0` from being read as truthy; `_safe_name()` sanitizes `session_id`/`tool_use_id` before they touch the filesystem (rejects traversal, SHA1 fallback for empty/dot inputs); `_safe_flush()` replaces four 2s `force_flush` calls with a 1s timeout that swallows exceptions so a slow OTLP endpoint cannot block tool execution; debug log moved to `~/.cache/claude-forge/hook.log` (0600, opt-in via `CLAUDE_FORGE_HOOK_DEBUG=1`, no raw payloads). Installer shell-quotes `HOOK_CMD` via `printf %q` for paths with spaces. `settings.local.json.example` broadens matchers to `.*` and adds `UserPromptSubmit`/`Stop` so root and session-complete spans emit
+- **Dependabot Auto-Merge** — Dropped `--required` from `gh pr checks --watch`; the flag failed on dependabot branches because no required checks are configured for those branch patterns
+
 ## [1.3.2] - 2026-04-06
 
 ### Added
