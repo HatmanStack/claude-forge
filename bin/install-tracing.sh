@@ -97,7 +97,7 @@ cp "$SRC_HOOK" "$DEST_HOOK"
 chmod +x "$DEST_HOOK"
 ok "Hook installed: $DEST_HOOK"
 
-HOOK_CMD="$VENV_PY $DEST_HOOK"
+HOOK_CMD="$(printf '%q %q' "$VENV_PY" "$DEST_HOOK")"
 
 # ---------------- 6. self-test (without requiring Jaeger) ----------------
 say "Running self-test"
@@ -127,7 +127,7 @@ else
   warn "OTLP endpoint NOT reachable: $OTEL_ENDPOINT"
   warn "  Start Jaeger before tracing will work, e.g.:"
   warn "    docker run -d --name jaeger --restart unless-stopped \\"
-  warn "      -p 16686:16686 -p 4317:4317 -p 4318:4318 jaegertracing/all-in-one:latest"
+  warn "      -p 16686:16686 -p 4317:4317 -p 4318:4318 jaegertracing/jaeger:latest"
 fi
 
 # ---------------- 7. write/merge settings ----------------

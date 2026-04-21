@@ -30,6 +30,7 @@ Enable:
 import hashlib
 import json
 import os
+import re
 import sys
 import tempfile
 import time
@@ -40,11 +41,28 @@ SUBAGENT_TOOLS = ("Task", "Agent", "SendMessage")
 PROMPT_LIMIT = 2048
 OUTPUT_LIMIT = 2048
 INPUT_LIMIT = 1024
-DEBUG_LOG = "/tmp/claude-forge-hook.log"
+FLUSH_TIMEOUT_MS = 1000  # force_flush budget per event; balance latency vs. drop risk
+
+
+def _env_truthy(name):
+    """Env-var truthiness with an explicit allowlist so `FOO=0` doesn't mean on."""
+    val = (os.environ.get(name) or "").strip().lower()
+    return val in ("1", "true", "yes", "on")
+
+
+# Debug log is opt-in (CLAUDE_FORGE_HOOK_DEBUG=1). Raw hook payloads contain
+# prompts, tool inputs, and assistant output — writing them world-readable to
+# /tmp is a data leak on multi-user systems. When enabled, we write to a
+# per-user path with 0600 permissions.
+DEBUG_LOG_ENABLED = _env_truthy("CLAUDE_FORGE_HOOK_DEBUG")
+DEBUG_LOG = (
+    os.environ.get("CLAUDE_FORGE_HOOK_DEBUG_LOG")
+    or str(Path.home() / ".cache" / "claude-forge" / "hook.log")
+)
 
 # Inner tool tracing is opt-in: a normal /pipeline can fire 200+ tool calls.
 # Set CLAUDE_FORGE_TRACE_INNER=1 to capture them as child spans of each subagent.
-TRACE_INNER = bool(os.environ.get("CLAUDE_FORGE_TRACE_INNER"))
+TRACE_INNER = _env_truthy("CLAUDE_FORGE_TRACE_INNER")
 
 # When inner tracing IS on, these read-only / planning tools are skipped by
 # default to keep the trace tree readable. Override with a comma-separated list
@@ -62,13 +80,40 @@ def _exit_ok():
 
 
 def _log(msg, raw=""):
+    if not DEBUG_LOG_ENABLED:
+        return
     try:
-        with open(DEBUG_LOG, "a") as f:
+        p = Path(DEBUG_LOG)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        # Create with 0600 if new; chmod every write is fine, cheap.
+        flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND
+        fd = os.open(str(p), flags, 0o600)
+        try:
+            os.fchmod(fd, 0o600)
+        except Exception:
+            pass
+        with os.fdopen(fd, "a") as f:
             f.write(msg + "\n")
             if raw:
                 f.write(raw[:500] + ("...\n" if len(raw) > 500 else "\n"))
     except Exception:
         pass
+
+
+_SAFE_RE = re.compile(r"[^A-Za-z0-9._-]")
+
+
+def _safe_name(s, fallback_prefix="x"):
+    """Filename-safe token. Sanitizes anything that could escape a Path segment."""
+    if not isinstance(s, str) or not s:
+        s = ""
+    # Reject anything that tries path traversal or pure-dot sequences.
+    cleaned = _SAFE_RE.sub("_", s)[:80]
+    if not cleaned or cleaned in (".", ".."):
+        # Unsafe or empty → deterministic hash fallback.
+        h = hashlib.sha1((s or fallback_prefix).encode("utf-8")).hexdigest()[:16]
+        return f"{fallback_prefix}_{h}"
+    return cleaned
 
 
 def _truncate(s, n):
@@ -78,7 +123,10 @@ def _truncate(s, n):
 
 
 def _state_dir(session_id):
-    d = Path(tempfile.gettempdir()) / "claude-forge-tracing" / session_id
+    # session_id comes from the hook payload; sanitize before using as a path
+    # segment so a malformed value can't escape the tracing tmp root.
+    safe = _safe_name(session_id, fallback_prefix="sess")
+    d = Path(tempfile.gettempdir()) / "claude-forge-tracing" / safe
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -231,6 +279,15 @@ def _otel():
     }
 
 
+def _safe_flush(otel):
+    """Bounded, exception-safe flush so a slow/unreachable OTLP endpoint can't
+    block tool execution."""
+    try:
+        otel["provider"].force_flush(timeout_millis=FLUSH_TIMEOUT_MS)
+    except Exception:
+        pass
+
+
 def _read_carrier(state_dir, fname):
     f = state_dir / fname
     if not f.exists():
@@ -327,7 +384,7 @@ def _handle_stop(otel, payload, state_dir):
                     totals[k] += u[k]
         _set_usage_attrs(span, "session.tokens", totals)
     span.end(end_time=end_ns)
-    otel["provider"].force_flush(timeout_millis=2000)
+    _safe_flush(otel)
     # Mark stopped but DON'T clean up: Stop can fire more than once during a
     # session (e.g. orchestrator pauses + resumes). Keeping _root.json means
     # subsequent subagent calls stay on the same trace_id. State accumulates
@@ -388,8 +445,13 @@ def _handle_subagent_pre(otel, payload, state_dir, tool_use_id):
         "transcript_path": payload.get("transcript_path") or "",
     }
     (state_dir / f"agent_{tool_use_id}.json").write_text(json.dumps(state))
+    # _current_agent.json is single-writer because Claude Forge's
+    # pipeline-protocol.md mandates strictly sequential subagent spawning
+    # ("NO parallel agents"). If a future flow ever runs subagents concurrently,
+    # inner-tool spans here could parent to the wrong subagent — switch to a
+    # per-invocation key + skip-on-ambiguity at that point.
     (state_dir / "_current_agent.json").write_text(json.dumps(state))
-    otel["provider"].force_flush(timeout_millis=2000)
+    _safe_flush(otel)
 
 
 def _handle_subagent_post(otel, payload, state_dir, tool_use_id):
@@ -439,7 +501,7 @@ def _handle_subagent_post(otel, payload, state_dir, tool_use_id):
         _set_usage_attrs(span, "agent.tokens", usage)
 
     span.end(end_time=end_ns)
-    otel["provider"].force_flush(timeout_millis=2000)
+    _safe_flush(otel)
 
     try:
         state_file.unlink()
@@ -518,7 +580,7 @@ def _handle_inner_post(otel, payload, state_dir, key):
     if is_error:
         span.set_status(otel["Status"](otel["StatusCode"].ERROR, "tool reported error"))
     span.end(end_time=end_ns)
-    otel["provider"].force_flush(timeout_millis=2000)
+    _safe_flush(otel)
     try:
         state_file.unlink()
     except Exception:
@@ -537,7 +599,7 @@ def main():
         raw,
     )
 
-    if not os.environ.get("CLAUDE_FORGE_TRACING"):
+    if not _env_truthy("CLAUDE_FORGE_TRACING"):
         _exit_ok()
 
     try:
@@ -562,12 +624,15 @@ def main():
         elif event in ("PreToolUse", "pre_tool_use", "PostToolUse", "post_tool_use"):
             tool_name = payload.get("tool_name") or payload.get("toolName") or ""
             tool_input = payload.get("tool_input") or {}
-            tool_use_id = (
+            raw_tool_use_id = (
                 payload.get("tool_use_id")
                 or payload.get("toolUseId")
                 or tool_input.get("id")
                 or _key_for(tool_name, tool_input)
             )
+            # tool_use_id becomes a filename (agent_<id>.json / tool_<id>.json),
+            # so strip anything that could escape the state dir.
+            tool_use_id = _safe_name(raw_tool_use_id, fallback_prefix="tu")
             is_subagent = tool_name in SUBAGENT_TOOLS
             if event in ("PreToolUse", "pre_tool_use"):
                 if is_subagent:
