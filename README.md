@@ -235,7 +235,8 @@ Restart Claude Code from that shell, run `/pipeline`, then open <http://localhos
 | Variable | Default | Purpose |
 |---|---|---|
 | `CLAUDE_FORGE_TRACING` | unset | Master on/off — hook is a no-op without this |
-| `CLAUDE_FORGE_TRACE_INNER` | unset | Opt in to child spans for Read/Edit/Bash/etc. inside each subagent (off by default to keep traces readable) |
+| `CLAUDE_FORGE_TRACE_MUTATIONS` | `1` (on) | Trace each subagent's mutational tool calls (`Write`, `Edit`, `MultiEdit`, `Bash`) as child spans. On by default — these show *what* each subagent changed. Set to `0` for pure agent-level traces. |
+| `CLAUDE_FORGE_TRACE_INNER` | unset | Also trace *non-mutational* inner tools (Read/Glob/Grep/etc.). Off by default — a `/pipeline` can fire 200+ such calls. |
 | `CLAUDE_FORGE_TRACE_TOOL_BLOCKLIST` | `Read,Glob,Grep,TodoWrite,NotebookRead` | When inner tracing is on, comma-separated tools to skip. Empty string disables the blocklist |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4317` | OTLP/gRPC endpoint for any backend (Jaeger, Tempo, Honeycomb, etc.) |
 

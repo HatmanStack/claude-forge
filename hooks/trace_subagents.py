@@ -60,8 +60,16 @@ DEBUG_LOG = (
     or str(Path.home() / ".cache" / "claude-forge" / "hook.log")
 )
 
-# Inner tool tracing is opt-in: a normal /pipeline can fire 200+ tool calls.
-# Set CLAUDE_FORGE_TRACE_INNER=1 to capture them as child spans of each subagent.
+# Mutational tools are traced by default — they're the signal of "what each
+# subagent actually changed/ran" and there are few enough of them per run that
+# they don't clutter the trace tree. Disable with CLAUDE_FORGE_TRACE_MUTATIONS=0.
+MUTATION_TOOLS = {"Write", "Edit", "MultiEdit", "Bash"}
+TRACE_MUTATIONS = os.environ.get("CLAUDE_FORGE_TRACE_MUTATIONS", "1").strip().lower() not in (
+    "0", "false", "no", "off", ""
+)
+
+# Inner tool tracing for *non-mutational* tools (Read, Glob, Grep, …) is opt-in:
+# a normal /pipeline can fire 200+ such calls. Set CLAUDE_FORGE_TRACE_INNER=1.
 TRACE_INNER = _env_truthy("CLAUDE_FORGE_TRACE_INNER")
 
 # When inner tracing IS on, these read-only / planning tools are skipped by
@@ -517,13 +525,19 @@ def _handle_subagent_post(otel, payload, state_dir, tool_use_id):
         pass
 
 
+def _should_trace_inner(tool_name):
+    """Mutational tools trace by default; everything else needs TRACE_INNER=1
+    and isn't in the blocklist."""
+    if tool_name in MUTATION_TOOLS:
+        return TRACE_MUTATIONS
+    return TRACE_INNER and tool_name not in INNER_TOOL_BLOCKLIST
+
+
 def _handle_inner_pre(payload, state_dir, key):
     """Record start time + input for a non-subagent tool call happening inside
-    an active subagent. No-op if inner tracing is off, the tool is blocked,
-    or there's no active agent."""
-    if not TRACE_INNER:
-        return
-    if (payload.get("tool_name") or "") in INNER_TOOL_BLOCKLIST:
+    an active subagent. No-op if the tool isn't being traced or there's no
+    active agent."""
+    if not _should_trace_inner(payload.get("tool_name") or ""):
         return
     if not (state_dir / "_current_agent.json").exists():
         return
@@ -536,9 +550,7 @@ def _handle_inner_pre(payload, state_dir, key):
 
 
 def _handle_inner_post(otel, payload, state_dir, key):
-    if not TRACE_INNER:
-        return
-    if (payload.get("tool_name") or "") in INNER_TOOL_BLOCKLIST:
+    if not _should_trace_inner(payload.get("tool_name") or ""):
         return
     state_file = state_dir / f"tool_{key}.json"
     if not state_file.exists():
