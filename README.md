@@ -218,6 +218,19 @@ The script:
 
 Flags: `--no-settings` (install only, print snippet), `--uninstall` (remove the venv + hook).
 
+**Tip — alias it.** You'll re-run this command per-project (one-time wiring) and after every claude-forge release (to refresh the shared hook). Add to `~/.bashrc` (or `~/.zshrc`) once:
+
+```bash
+forge-trace() {
+  local s
+  s=$(find ~/.claude -path '*/forge*' -name install-tracing.sh 2>/dev/null | head -1)
+  [[ -z "$s" ]] && { echo "forge plugin not installed"; return 1; }
+  bash "$s" "$@"
+}
+```
+
+Then it's just `forge-trace` (or `forge-trace --no-settings`, `forge-trace --uninstall`) from any project.
+
 ### 4. Opt in
 
 Add to your shell init (`~/.bashrc`, `~/.zshrc`, etc.) and restart your terminal:
@@ -239,6 +252,8 @@ When a new claude-forge release updates the hook, plugin users need two commands
 ```
 then in a shell, from any project:
 ```bash
+forge-trace                                # if you set up the alias above
+# or, without the alias:
 bash "$(find ~/.claude -path '*/forge*' -name install-tracing.sh 2>/dev/null | head -1)"
 ```
 
