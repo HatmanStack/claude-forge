@@ -230,6 +230,20 @@ export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
 
 Restart Claude Code from that shell, run `/pipeline`, then open <http://localhost:16686> and pick the `claude-forge` service. To disable, unset the env var (or run `bash bin/install-tracing.sh --uninstall`).
 
+### Updating tracing
+
+When a new claude-forge release updates the hook, plugin users need two commands to pull it through:
+
+```
+/plugin marketplace update claude-forge    # refreshes ~/.claude/plugins/cache/claude-forge
+```
+then in a shell, from any project:
+```bash
+bash "$(find ~/.claude -path '*/forge*' -name install-tracing.sh 2>/dev/null | head -1)"
+```
+
+The install script re-copies the hook from the refreshed plugin cache to `~/.local/share/claude-forge/trace_subagents.py`. Because every project's `settings.local.json` points to that absolute path, **all projects pick up the new hook automatically** on their next tool call — no per-project re-run and no Claude Code restart needed. If you skip the marketplace-update step, the install script will happily copy the *old* cached hook and your traces won't reflect the release.
+
 ### Other tracing knobs
 
 | Variable | Default | Purpose |
