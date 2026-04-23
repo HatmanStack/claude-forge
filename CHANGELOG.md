@@ -5,6 +5,14 @@ All notable changes to Claude Forge will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.1] - 2026-04-23
+
+### Fixed
+
+- **Tool spans for SendMessage continuations** — `_find_subagent_transcript` now strips the `(continued)` suffix that the SendMessage naming helper adds, so SendMessage post-events resolve back to the same per-subagent JSONL as the original Agent spawn. Also added a direct lookup for `to=<agent_id>` form (16-char hex) that bypasses the description scan. `_emit_subagent_inner_spans` now filters tool_uses by `ts_ns >= anchor_start_ns` so each SendMessage continuation only emits its own window of tool calls instead of re-emitting all prior tool spans for that agent
+- **Documented `forge-trace` version-selection bug** — README's `forge-trace` shell-function tip now uses `find ... | sort -V | tail -1` instead of `find ... | head -1`. With multiple cached plugin versions (e.g. after a few `/plugin install` upgrades), `head -1` returns whatever filesystem iteration produces first, which silently picks an old version and rolls the deployed hook back to a stale snapshot. `sort -V | tail -1` always picks the latest
+- **Documented three-command upgrade flow** — README "Updating tracing" section now leads with a ⚠️ that plugin updates require three commands, not two: `/plugin marketplace update` (refreshes index), `/plugin install forge@claude-forge` (actually upgrades the installed plugin to the new version), then `forge-trace` (deploys the refreshed hook). Skipping the middle step leaves the installed plugin pinned to its original version and `forge-trace` silently copies the stale cached hook
+
 ## [1.6.0] - 2026-04-23
 
 ### Added
