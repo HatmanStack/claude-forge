@@ -542,19 +542,57 @@ def _handle_instructions_loaded(otel, payload, state_dir):
     _safe_flush(otel)
 
 
+def _agent_name_from_payload(tool_input, tool_name, state_dir):
+    """Pick the most descriptive label for a span.
+
+    - Agent payloads have a `description` ("Planner: unified audit remediation
+      plan") and `name` ("planner"). Prefer description.
+    - SendMessage payloads have `to` (role-name OR agent-id) and `summary`.
+      Look up `to` in the saved name->description map; if found use that, else
+      fall back to summary or `to` itself.
+    """
+    if tool_name == "SendMessage":
+        to = (tool_input.get("to") or tool_input.get("recipient") or "").strip()
+        if to:
+            mapped = _read_carrier(state_dir, "_agent_names.json") or {}
+            name = mapped.get(to) or mapped.get(to.lower())
+            if name:
+                return f"{name} (continued)"
+            return to + " (continued)"
+        return tool_input.get("summary") or "send_message"
+    return (
+        tool_input.get("description")
+        or tool_input.get("subagent_type")
+        or "subagent"
+    )
+
+
+def _record_agent_name(state_dir, tool_input):
+    """Save name+description+id mappings so future SendMessage Pre events can
+    resolve `to=<role>` or `to=<agent_id>` back to a friendly name."""
+    f = state_dir / "_agent_names.json"
+    try:
+        existing = json.loads(f.read_text()) if f.exists() else {}
+    except Exception:
+        existing = {}
+    desc = tool_input.get("description") or ""
+    role = tool_input.get("name") or ""
+    if desc and role:
+        existing[role] = desc
+        existing[role.lower()] = desc
+    f.write_text(json.dumps(existing))
+
+
 def _handle_subagent_pre(otel, payload, state_dir, tool_use_id):
     """Emit an anchor span for the subagent so child tool calls have a parent.
     Save the anchor's carrier for child lookup, plus start time + input for the
     real-duration result span emitted at Post."""
     tool_input = payload.get("tool_input") or {}
-    # Prefer description: in Claude Forge, every subagent_type is "general-purpose"
-    # because role identity (planner / reviewer / implementer / …) lives in the
-    # description + prompt, not in the registered subagent type.
-    name = (
-        tool_input.get("description")
-        or tool_input.get("subagent_type")
-        or "subagent"
-    )
+    tool_name = payload.get("tool_name") or ""
+    # Save role-name → description so SendMessage Pre can resolve to that.
+    if tool_name == "Agent":
+        _record_agent_name(state_dir, tool_input)
+    name = _agent_name_from_payload(tool_input, tool_name, state_dir)
     start_ns = time.time_ns()
     # Defensive: if UserPromptSubmit didn't fire (or fired with a different
     # session_id), create a root anchor now so this subagent — and all that
@@ -569,17 +607,28 @@ def _handle_subagent_pre(otel, payload, state_dir, tool_use_id):
     parent_ctx = (
         otel["propagator"].extract(carrier=root.get("carrier") or {}) if root else None
     )
+    # Build attrs that work for both Agent (description/prompt) and
+    # SendMessage (to/summary/message) payload shapes.
+    attrs = {
+        "agent.subagent_type": tool_input.get("subagent_type", ""),
+        "agent.description": tool_input.get("description", ""),
+        "agent.name": tool_input.get("name", ""),
+        "agent.tool_name": tool_name,
+        "session.id": payload.get("session_id") or "default",
+    }
+    if tool_name == "SendMessage":
+        attrs["sendmessage.to"] = tool_input.get("to") or tool_input.get("recipient", "")
+        attrs["sendmessage.summary"] = tool_input.get("summary", "")
+        attrs["agent.prompt"] = _truncate(
+            tool_input.get("message") or tool_input.get("content") or "", PROMPT_LIMIT
+        )
+    else:
+        attrs["agent.prompt"] = _truncate(tool_input.get("prompt") or "", PROMPT_LIMIT)
     carrier = _emit_anchor(
         otel,
         f"subagent:{name}",
         parent_ctx=parent_ctx,
-        attrs={
-            "agent.subagent_type": tool_input.get("subagent_type", ""),
-            "agent.description": tool_input.get("description", ""),
-            "agent.prompt": _truncate(tool_input.get("prompt") or "", PROMPT_LIMIT),
-            "agent.tool_name": payload.get("tool_name") or "",
-            "session.id": payload.get("session_id") or "default",
-        },
+        attrs=attrs,
         start_ns=start_ns,
     )
     state = {
