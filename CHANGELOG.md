@@ -5,6 +5,17 @@ All notable changes to Claude Forge will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-04-23
+
+### Added
+
+- **Subagent Inner Tool Spans (synthetic)** — When an Agent-spawned subagent finishes, `_handle_subagent_post` now walks the subagent's per-agent JSONL transcript at `<session>/subagents/agent-<id>.jsonl` and emits one synthetic `tool:<name>` span per `tool_use` block, parented to the subagent anchor. Real wall-clock timestamps from the transcript lines, full `tool.input` and `tool.output` (truncated), `agent.name` for filtering, ERROR span status when the subagent's tool failed. Workaround for [Claude Code issue #34692](https://github.com/anthropics/claude-code/issues/34692) (parent hooks don't fire for subagent tool calls) and [#18392](https://github.com/anthropics/claude-code/issues/18392) (frontmatter hooks not executed for subagents) — there is no live hook-based path for inner-tool visibility, so we synthesize retroactively from the transcript Claude Code writes anyway. Honors existing `_should_trace_inner` gating: mutational tools by default, others require `CLAUDE_FORGE_TRACE_INNER=1`, blocklist drops Read/Glob/Grep/etc.
+  - **Caveat:** spans materialize *after* the subagent finishes, not in real-time. Wall-clock timestamps are accurate; the spans just appear in Jaeger when the parent's `PostToolUse Agent` fires.
+
+### Changed
+
+- **SendMessage Span Naming** — `SendMessage` Pre/Post events previously fell through to the literal `"subagent"` fallback because the SendMessage payload has no `description` field (it carries `to`/`summary`/`message`). Result: long pipelines showed `subagent:subagent` spans and lost track of which agent was being addressed. Now: at every `Agent` Pre, we save a `name → description` map to `_agent_names.json`. At `SendMessage` Pre, we resolve `tool_input.to` (role name OR agent_id) against that map and use the original description with a `(continued)` suffix. New attributes on SendMessage anchors: `sendmessage.to`, `sendmessage.summary`, `agent.prompt` now picks `message`/`content` instead of being empty. New `agent.name` attribute on all subagent spans
+
 ## [1.5.0] - 2026-04-23
 
 ### Added

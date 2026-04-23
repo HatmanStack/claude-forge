@@ -1,7 +1,7 @@
 {
   "name": "forge",
   "description": "Adversarial multi-agent pipeline for Claude Code. GAN-style loops where generators produce artifacts, discriminators validate them, and feedback drives convergence.",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "author": {
     "name": "HatmanStack"
   },
