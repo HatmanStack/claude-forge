@@ -78,8 +78,10 @@ The planner reads `health-audit.md` instead of `brainstorm.md`. The planner crea
 
 ### 2a: Spawn Planner
 
+**Agent naming:** All spawns follow the convention in `pipeline-protocol.md` — pass an explicit `name` at spawn and reuse it in every `SendMessage`. Phase tags (`[HYGIENIST]`, `[FORTIFIER]`) select the role prompt but do not change the addressable name: phase N is always `implementer-phase-N` / `reviewer-phase-N`.
+
 - **Read** `planner.md` for the role prompt
-- Spawn an **Agent** with:
+- Spawn an **Agent** with `name="planner"`:
 
 ```xml
 <role_prompt>
@@ -134,7 +136,7 @@ Process phases sequentially. The orchestrator determines which implementer role 
 - After implementation, spawn **Health Reviewer** (`health-reviewer.md`) for review
 - Loop until `PHASE_APPROVED` or max iterations
 
-**Agent spawn format is the same as main SKILL.md Stage 2, substituting the appropriate role prompt.**
+**Agent spawn format is the same as main SKILL.md Stage 2, substituting the appropriate role prompt.** Use `name="implementer-phase-N"` and `name="reviewer-phase-N"` regardless of tag — the tag picks the prompt, not the name.
 
 Report between phases:
 ```text
@@ -149,7 +151,7 @@ After all phases are `PHASE_APPROVED`, run a single verification agent that veri
 ### 4a: Spawn Verification Agent
 
 - **Read** `reviewer.md` for the role prompt
-- Spawn **one Agent** with:
+- Spawn **one Agent** with `name="verification-reviewer"`:
 
 ```xml
 <role_prompt>

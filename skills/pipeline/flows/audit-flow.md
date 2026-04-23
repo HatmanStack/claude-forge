@@ -88,8 +88,10 @@ The planner reads ALL intake docs and creates ONE unified plan.
 
 ### 1a: Spawn Planner
 
+**Agent naming:** All spawns follow the convention in `pipeline-protocol.md` — pass an explicit `name` at spawn and reuse it in every `SendMessage`. Phase tags (`[HYGIENIST]`, `[FORTIFIER]`, etc.) select the role prompt but do not change the addressable name: phase N is always `implementer-phase-N` / `reviewer-phase-N`.
+
 - **Read** `planner.md` for the role prompt
-- Spawn an **Agent** with:
+- Spawn an **Agent** with `name="planner"`:
 
 ```xml
 <role_prompt>
@@ -126,7 +128,7 @@ When complete, end with: PLAN_COMPLETE
 
 ### 1a (Re-entry): Spawn Planner After Re-Evaluation
 
-When looping back from Stage 3 (Verification) with unverified items:
+When looping back from Stage 3 (Verification) with unverified items, reuse the existing planner via `SendMessage(to="planner", ...)` rather than spawning a new agent. If the planner is no longer addressable (new session), spawn a fresh one with `name="planner"`:
 
 ```xml
 <role_prompt>
@@ -178,7 +180,7 @@ For each phase, read the phase title to determine the tag, then spawn the correc
 - Implementer: **Read** `doc-engineer.md`, spawn with doc engineer role prompt
 - Reviewer: **Read** `doc-reviewer.md`, spawn with doc reviewer role prompt
 
-Agent spawn format is the same as main SKILL.md Stage 2, substituting the appropriate role prompt per phase tag.
+Agent spawn format is the same as main SKILL.md Stage 2, substituting the appropriate role prompt per phase tag. Use `name="implementer-phase-N"` and `name="reviewer-phase-N"` regardless of which role prompt was loaded — the tag picks the prompt, not the name.
 
 Loop until `PHASE_APPROVED` or max iterations per phase.
 
@@ -195,7 +197,7 @@ After all phases are `PHASE_APPROVED`, run a single verification agent that veri
 ### 3a: Spawn Verification Agent
 
 - **Read** `reviewer.md` for the role prompt
-- Spawn **one Agent** with:
+- Spawn **one Agent** with `name="verification-reviewer"`:
 
 ```xml
 <role_prompt>

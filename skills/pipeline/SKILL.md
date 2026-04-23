@@ -68,10 +68,12 @@ Report the detected state to the user before continuing.
 
 **One Planner agent and one Plan Reviewer agent for the entire planning stage.** Spawn each once, then use `SendMessage` for subsequent iterations.
 
+**Agent naming:** Every spawn passes an explicit `name` per the convention in `pipeline-protocol.md`. SendMessage uses the same name. Never use role descriptions or agent IDs.
+
 ### 1a: Spawn Planner (once)
 
 - **Read** `planner.md` to load the role prompt
-- Spawn an **Agent** — note its agent ID for later `SendMessage`:
+- Spawn an **Agent** with `name="planner"`:
 
 ```xml
 <role_prompt>
@@ -96,7 +98,7 @@ When complete, end your response with: PLAN_COMPLETE
 ### 1b: Spawn Plan Reviewer (once)
 
 - **Read** `plan_reviewer.md` to load the role prompt
-- Spawn an **Agent** — note its agent ID for later `SendMessage`:
+- Spawn an **Agent** with `name="plan-reviewer"`:
 
 ```xml
 <role_prompt>
@@ -118,7 +120,7 @@ If plan is good: end with: PLAN_APPROVED
 
 - Check the reviewer's signal:
   - `PLAN_APPROVED` → proceed to Stage 2
-  - `REVISION_REQUIRED` → use **SendMessage** to the SAME Planner agent (by ID):
+  - `REVISION_REQUIRED` → use **SendMessage** with `to="planner"`:
 
 ```text
 The Plan Reviewer has requested revisions. Read docs/plans/$ARGUMENTS/feedback.md for OPEN items tagged PLAN_REVIEW.
@@ -128,7 +130,7 @@ Address each item by revising the plan files. Move resolved feedback to the "Res
 When complete, end your response with: PLAN_COMPLETE
 ```
 
-- After the planner responds, use **SendMessage** to the SAME Plan Reviewer agent (by ID):
+- After the planner responds, use **SendMessage** with `to="plan-reviewer"`:
 
 ```text
 The Planner has revised the plan. Re-review the changes:
@@ -187,7 +189,7 @@ Continuing from Phase N...
 #### 2a: Spawn Implementer (once per phase)
 
 - **Read** `implementer.md` to load the role prompt
-- Spawn an **Agent** — note its agent ID for later `SendMessage`:
+- Spawn an **Agent** with `name="implementer-phase-N"` (substitute the actual phase number):
 
 ```xml
 <role_prompt>
@@ -213,7 +215,7 @@ When complete, end your response with: IMPLEMENTATION_COMPLETE
 #### 2b: Spawn Reviewer (once per phase)
 
 - **Read** `reviewer.md` to load the role prompt
-- Spawn an **Agent** — note its agent ID for later `SendMessage`:
+- Spawn an **Agent** with `name="reviewer-phase-N"` (substitute the actual phase number):
 
 ```xml
 <role_prompt>
@@ -240,7 +242,7 @@ If implementation is good: end with: PHASE_APPROVED
 
 - Check the reviewer's signal:
   - `PHASE_APPROVED` → report to user, move to next phase
-  - `CHANGES_REQUESTED` → use **SendMessage** to the SAME Implementer agent (by ID):
+  - `CHANGES_REQUESTED` → use **SendMessage** with `to="implementer-phase-N"`:
 
 ```text
 The Code Reviewer has requested changes. Read docs/plans/$ARGUMENTS/feedback.md for OPEN items tagged CODE_REVIEW.
@@ -250,7 +252,7 @@ Address each item. Move resolved feedback to "Resolved Feedback" with a resoluti
 When complete, end your response with: IMPLEMENTATION_COMPLETE
 ```
 
-- After the implementer responds, use **SendMessage** to the SAME Reviewer agent (by ID):
+- After the implementer responds, use **SendMessage** with `to="reviewer-phase-N"`:
 
 ```text
 The Implementer has addressed the feedback. Re-review the changes:
@@ -277,7 +279,7 @@ Remaining phases: [list]
 After all phases are approved:
 
 - **Read** `final_reviewer.md` to load the role prompt
-- Spawn an **Agent** with:
+- Spawn an **Agent** with `name="final-reviewer"`:
 
 ```xml
 <role_prompt>
@@ -383,7 +385,7 @@ B) Manually resolve and continue
 ### Agent Spawning
 
 - **ONE agent at a time.** Every stage runs a single foreground agent. Wait for it to complete fully before deciding the next step.
-- **ONE Implementer and ONE Reviewer per phase.** Spawn each once, then use `SendMessage` (by agent ID) for subsequent iterations. Never spawn a new agent for the same role within a phase.
+- **ONE Implementer and ONE Reviewer per phase.** Spawn each once with the canonical `name` from `pipeline-protocol.md`, then use `SendMessage(to="<same-name>")` for subsequent iterations. Never spawn a new agent for the same role within a phase. Never address by role description or agent ID — always by name.
 - **NO duplicate or replacement agents.** If an agent is slow, wait. Agents can take 20+ minutes on large codebases. Do NOT spawn a second agent for the same work.
 - **NO per-phase planners.** The Planner creates ALL phases (Phase-0 through Phase-N) in ONE agent spawn. Never decompose planning into separate agents per phase.
 - **NO parallel agents.** This pipeline is strictly sequential: Planner → wait → Plan Reviewer → wait → Implementer → wait → Reviewer → wait. Never overlap stages.

@@ -78,8 +78,10 @@ The planner reads `doc-audit.md` instead of `brainstorm.md`. The planner creates
 
 ### 2a: Spawn Planner
 
+**Agent naming:** All spawns follow the convention in `pipeline-protocol.md` — pass an explicit `name` at spawn and reuse it in every `SendMessage`. Never use role descriptions or agent IDs.
+
 - **Read** `planner.md` for the role prompt
-- Spawn an **Agent** with:
+- Spawn an **Agent** with `name="planner"`:
 
 ```xml
 <role_prompt>
@@ -120,7 +122,7 @@ Loop until `PLAN_APPROVED` or max iterations.
 - **Read** `doc-engineer.md` for the implementer role prompt
 - **Read** `doc-reviewer.md` for the reviewer role prompt
 
-Process phases sequentially. Agent spawn format matches main SKILL.md Stage 2, substituting the doc-engineer and doc-reviewer role prompts.
+Process phases sequentially. Agent spawn format matches main SKILL.md Stage 2, substituting the doc-engineer and doc-reviewer role prompts. Use `name="implementer-phase-N"` and `name="reviewer-phase-N"`.
 
 Report between phases:
 ```text
@@ -135,7 +137,7 @@ After all phases are `PHASE_APPROVED`, run a single verification agent that veri
 ### 4a: Spawn Verification Agent
 
 - **Read** `reviewer.md` for the role prompt
-- Spawn **one Agent** with:
+- Spawn **one Agent** with `name="verification-reviewer"`:
 
 ```xml
 <role_prompt>

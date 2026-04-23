@@ -37,6 +37,43 @@ Shared contract defining stage sequencing, signals, and communication channels f
 | AUDIT_COMPLETE          | Health Auditor  | Intake orchestrator                      | Health audit finished (intake only)                           |
 | DOC_AUDIT_COMPLETE      | Doc Auditor     | Intake orchestrator                      | Doc audit finished (intake only)                              |
 
+## Agent Naming Convention
+
+Every `Agent` spawn in the pipeline **must** pass an explicit `name` parameter. Subsequent `SendMessage` calls use that same name as the `to` field. Do **not** use role descriptions, free-form labels, or agent IDs — names are deterministic and orchestrator-chosen, so no lookup or ID capture is needed.
+
+| Slot | `name` |
+|------|--------|
+| Planner | `planner` |
+| Plan Reviewer | `plan-reviewer` |
+| Implementer (phase N, any tag) | `implementer-phase-N` |
+| Reviewer (phase N, any tag) | `reviewer-phase-N` |
+| Final Reviewer | `final-reviewer` |
+| Verification Reviewer | `verification-reviewer` |
+
+The phase tag (`[HYGIENIST]`, `[FORTIFIER]`, `[IMPLEMENTER]`, `[DOC-ENGINEER]`) determines which role prompt is loaded at spawn — it does **not** change the addressable name. Phase 3 tagged `[HYGIENIST]` is still `implementer-phase-3` / `reviewer-phase-3`.
+
+### Worked Example
+
+```text
+# Spawn planner
+Agent(name="planner", prompt="<role_prompt>...</role_prompt><task>...</task>")
+→ planner finishes with PLAN_COMPLETE
+
+# Spawn plan reviewer
+Agent(name="plan-reviewer", prompt="...")
+→ reviewer finishes with REVISION_REQUIRED
+
+# Revise — SAME planner, addressed by name
+SendMessage(to="planner", message="Read feedback.md OPEN PLAN_REVIEW items...")
+→ planner finishes with PLAN_COMPLETE
+
+# Re-review — SAME plan-reviewer
+SendMessage(to="plan-reviewer", message="Re-review the revised plan...")
+→ reviewer finishes with PLAN_APPROVED
+```
+
+**Never** `SendMessage(to="role-description-string")` or construct names on the fly — always use the fixed table above.
+
 ## Communication Channel: feedback.md
 
 All review feedback lives in `docs/plans/<plan_id>/feedback.md`. Plan documents are **never mutated** by reviewers.
