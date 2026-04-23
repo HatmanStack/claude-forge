@@ -245,19 +245,32 @@ Restart Claude Code from that shell, run `/pipeline`, then open <http://localhos
 
 ### Updating tracing
 
-When a new claude-forge release updates the hook, plugin users need two commands to pull it through:
+> ⚠️ **Three commands, in order.** Plugin updates are layered: the marketplace index, the installed plugin version, and the deployed hook are independent. Skip a step and you'll silently roll back to whatever was installed last.
 
 ```
-/plugin marketplace update claude-forge    # refreshes ~/.claude/plugins/cache/claude-forge
+/plugin marketplace update claude-forge    # 1. refresh marketplace metadata (knows which versions exist)
+/plugin install forge@claude-forge         # 2. UPGRADE the installed plugin to the latest version
+                                           #    (writes ~/.claude/plugins/cache/claude-forge/forge/<NEW_VERSION>/)
 ```
+
 then in a shell, from any project:
+
 ```bash
-forge-trace                                # if you set up the alias above
+forge-trace                                # 3. deploy the refreshed hook (copies plugin cache → ~/.local/share/claude-forge/)
 # or, without the alias:
 bash "$(find ~/.claude -path '*/forge*' -name install-tracing.sh 2>/dev/null | head -1)"
 ```
 
-The install script re-copies the hook from the refreshed plugin cache to `~/.local/share/claude-forge/trace_subagents.py`. Because every project's `settings.local.json` points to that absolute path, **all projects pick up the new hook automatically** on their next tool call — no per-project re-run and no Claude Code restart needed. If you skip the marketplace-update step, the install script will happily copy the *old* cached hook and your traces won't reflect the release.
+**Why all three:** `/plugin marketplace update` only refreshes the *index* of available versions — it does not touch any installed plugin. `/plugin install forge@claude-forge` is what actually upgrades your installed plugin to the new version. Without that step, the plugin cache stays at whatever version you originally installed (e.g. `forge/1.3.2/`), and `forge-trace` will dutifully copy *that* old hook on top of any newer one you'd manually deployed — silently rolling back your tracing.
+
+Verify after the three commands:
+
+```bash
+ls ~/.claude/plugins/cache/claude-forge/forge/             # should list the new version directory
+grep -c MUTATION_TOOLS ~/.local/share/claude-forge/trace_subagents.py   # should be > 0 (proves the deployed hook is current)
+```
+
+The deployed hook lives at `~/.local/share/claude-forge/trace_subagents.py`. Every project's `settings.local.json` points to that absolute path, so **all projects pick up the new hook automatically** on their next tool call — no per-project re-run and no Claude Code restart needed.
 
 ### Other tracing knobs
 
