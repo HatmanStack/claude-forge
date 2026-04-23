@@ -3,10 +3,18 @@
 Opt-in OpenTelemetry tracing hook for Claude Forge.
 
 Wired to Claude Code hooks (see settings.local.json.example):
-    - UserPromptSubmit  → opens per-session root span (real start time)
-    - PreToolUse  (.*)  → opens an anchor for subagent tools, records start for others
-    - PostToolUse (.*)  → emits the span with real duration
-    - Stop              → emits the per-session "session_complete" span
+    - SessionStart            → opens per-session root anchor (canonical)
+    - UserPromptSubmit        → opens root defensively if SessionStart missed it
+    - PreToolUse  (.*)        → opens an anchor for subagent tools, records start for others
+    - PostToolUse (.*)        → emits the span with real duration
+    - PostToolUseFailure (.*) → same as PostToolUse but forces is_error=true
+    - PermissionRequest (.*)  → emits permission_requested:<tool> span
+    - PermissionDenied  (.*)  → emits permission_denied:<tool> span
+    - PreCompact / PostCompact → emits compaction span (real duration)
+    - InstructionsLoaded      → emits instructions.loaded span (CLAUDE.md / rules)
+    - Stop                    → emits session_complete (idempotent — fires once)
+    - StopFailure             → session_complete with is_error=true
+    - SessionEnd              → session_complete (canonical end-of-session signal)
 
 Spans are arranged hierarchically:
     session: <user prompt>
@@ -363,9 +371,21 @@ def _handle_user_prompt(otel, payload, state_dir):
     )
 
 
-def _handle_stop(otel, payload, state_dir):
+def _emit_session_complete(otel, payload, state_dir, is_error=False):
+    """Emit the session_complete span. Idempotent: marks `complete_emitted` in
+    _root.json so multiple triggers (Stop fires per-turn, SessionEnd once at
+    close, StopFailure on API error) collapse to a single span per session."""
     root = _read_carrier(state_dir, "_root.json")
     if not root:
+        return
+    if root.get("complete_emitted"):
+        # Update error status if a later signal escalates from clean → error.
+        if is_error and not root.get("complete_error"):
+            root["complete_error"] = True
+            try:
+                (state_dir / "_root.json").write_text(json.dumps(root))
+            except Exception:
+                pass
         return
     end_ns = time.time_ns()
     start_ns = root.get("start_ns") or end_ns
@@ -377,11 +397,10 @@ def _handle_stop(otel, payload, state_dir):
     span.set_attribute("session.duration_ms", (end_ns - start_ns) // 1_000_000)
     span.set_attribute("user.prompt", root.get("prompt", ""))
     span.set_attribute("session.cwd", root.get("cwd", ""))
+    span.set_attribute("session.is_error", is_error)
     transcript = payload.get("transcript_path") or root.get("transcript_path") or ""
     if transcript:
         span.set_attribute("session.transcript_path", transcript)
-        # Sum the parent transcript + every per-subagent transcript so the
-        # session total reflects all token spend across orchestrator + agents.
         totals = _sum_usage(transcript)
         base = transcript[:-6] if transcript.endswith(".jsonl") else transcript
         sub_dir = Path(base) / "subagents"
@@ -391,17 +410,136 @@ def _handle_stop(otel, payload, state_dir):
                 for k in totals:
                     totals[k] += u[k]
         _set_usage_attrs(span, "session.tokens", totals)
+    if is_error:
+        span.set_status(otel["Status"](otel["StatusCode"].ERROR, "session ended in failure"))
+    else:
+        span.set_status(otel["Status"](otel["StatusCode"].OK))
     span.end(end_time=end_ns)
     _safe_flush(otel)
-    # Mark stopped but DON'T clean up: Stop can fire more than once during a
-    # session (e.g. orchestrator pauses + resumes). Keeping _root.json means
-    # subsequent subagent calls stay on the same trace_id. State accumulates
-    # in /tmp but the OS reaps it; per-session dirs are tiny.
+    # Mark complete; keep _root.json so subagent calls after a Stop can still
+    # parent under the same trace_id. State accumulates in /tmp but the OS reaps it.
     try:
+        root["complete_emitted"] = True
+        root["complete_error"] = bool(is_error)
         root["stopped_at_ns"] = end_ns
         (state_dir / "_root.json").write_text(json.dumps(root))
     except Exception:
         pass
+
+
+def _handle_stop(otel, payload, state_dir):
+    """Stop fires after every Claude turn — defer to the idempotent emitter,
+    which only fires session_complete once per session."""
+    _emit_session_complete(otel, payload, state_dir)
+
+
+def _handle_session_end(otel, payload, state_dir):
+    """SessionEnd is the canonical end-of-session signal."""
+    _emit_session_complete(otel, payload, state_dir)
+
+
+def _handle_stop_failure(otel, payload, state_dir):
+    """StopFailure: turn ended due to API error. Mark session_complete as error."""
+    _emit_session_complete(otel, payload, state_dir, is_error=True)
+
+
+def _handle_session_start(otel, payload, state_dir):
+    """SessionStart is the cleanest root-anchor trigger. UserPromptSubmit also
+    creates the root defensively (idempotent), so resumed sessions still anchor
+    correctly even if SessionStart didn't fire."""
+    _ensure_root(
+        otel, state_dir,
+        session_id=payload.get("session_id") or "default",
+        prompt=payload.get("prompt") or "",
+        cwd=payload.get("cwd") or "",
+        transcript_path=payload.get("transcript_path") or "",
+    )
+
+
+def _parent_ctx(otel, state_dir):
+    """Pick the most appropriate parent context: active subagent if one is
+    running, else the session root, else None."""
+    cur = _read_carrier(state_dir, "_current_agent.json")
+    if cur and cur.get("carrier"):
+        return otel["propagator"].extract(carrier=cur["carrier"])
+    root = _read_carrier(state_dir, "_root.json")
+    if root and root.get("carrier"):
+        return otel["propagator"].extract(carrier=root["carrier"])
+    return None
+
+
+def _handle_permission(otel, payload, state_dir, denied):
+    """Emit a span for permission events so Jaeger shows when a tool was asked
+    to be approved or was blocked. Parents to the active subagent if any."""
+    parent_ctx = _parent_ctx(otel, state_dir)
+    if parent_ctx is None:
+        return
+    now_ns = time.time_ns()
+    tool = payload.get("tool_name") or payload.get("toolName") or "?"
+    op = "permission_denied" if denied else "permission_requested"
+    span = otel["tracer"].start_span(f"{op}:{tool}", context=parent_ctx, start_time=now_ns)
+    span.set_attribute("permission.tool", tool)
+    span.set_attribute("permission.denied", denied)
+    reason = payload.get("reason") or payload.get("message") or ""
+    if reason:
+        span.set_attribute("permission.reason", _truncate(reason, INPUT_LIMIT))
+    if denied:
+        span.set_status(otel["Status"](otel["StatusCode"].ERROR, "permission denied"))
+    span.end(end_time=now_ns + 1)
+    _safe_flush(otel)
+
+
+def _handle_pre_compact(otel, payload, state_dir):
+    """Stash compaction start time; PostCompact emits the span."""
+    try:
+        (state_dir / "_compaction.json").write_text(json.dumps({"start_ns": time.time_ns()}))
+    except Exception:
+        pass
+
+
+def _handle_post_compact(otel, payload, state_dir):
+    f = state_dir / "_compaction.json"
+    end_ns = time.time_ns()
+    start_ns = end_ns
+    if f.exists():
+        try:
+            d = json.loads(f.read_text())
+            start_ns = d.get("start_ns") or end_ns
+        except Exception:
+            pass
+    parent_ctx = _parent_ctx(otel, state_dir)
+    if parent_ctx is None:
+        return
+    span = otel["tracer"].start_span("compaction", context=parent_ctx, start_time=start_ns)
+    span.set_attribute("compaction.duration_ms", (end_ns - start_ns) // 1_000_000)
+    span.end(end_time=end_ns)
+    _safe_flush(otel)
+    try:
+        f.unlink()
+    except Exception:
+        pass
+
+
+def _handle_instructions_loaded(otel, payload, state_dir):
+    """Annotate the trace when CLAUDE.md or rule files load — useful when an
+    instruction file shapes agent behavior unexpectedly."""
+    parent_ctx = _parent_ctx(otel, state_dir)
+    if parent_ctx is None:
+        return
+    now_ns = time.time_ns()
+    path = (
+        payload.get("path") or payload.get("file_path")
+        or payload.get("instructionFile") or payload.get("file") or "?"
+    )
+    inst_type = payload.get("type") or payload.get("instructionType") or ""
+    span = otel["tracer"].start_span(
+        "instructions.loaded", context=parent_ctx, start_time=now_ns
+    )
+    span.set_attribute("instructions.path", str(path))
+    if inst_type:
+        span.set_attribute("instructions.type", str(inst_type))
+    span.end(end_time=now_ns + 1)
+    _safe_flush(otel)
 
 
 def _handle_subagent_pre(otel, payload, state_dir, tool_use_id):
@@ -631,9 +769,27 @@ def main():
     try:
         if event in ("UserPromptSubmit", "user_prompt_submit"):
             _handle_user_prompt(otel, payload, state_dir)
+        elif event in ("SessionStart", "session_start"):
+            _handle_session_start(otel, payload, state_dir)
+        elif event in ("SessionEnd", "session_end"):
+            _handle_session_end(otel, payload, state_dir)
         elif event in ("Stop", "stop"):
             _handle_stop(otel, payload, state_dir)
-        elif event in ("PreToolUse", "pre_tool_use", "PostToolUse", "post_tool_use"):
+        elif event in ("StopFailure", "stop_failure"):
+            _handle_stop_failure(otel, payload, state_dir)
+        elif event in ("PermissionDenied", "permission_denied"):
+            _handle_permission(otel, payload, state_dir, denied=True)
+        elif event in ("PermissionRequest", "permission_request"):
+            _handle_permission(otel, payload, state_dir, denied=False)
+        elif event in ("PreCompact", "pre_compact"):
+            _handle_pre_compact(otel, payload, state_dir)
+        elif event in ("PostCompact", "post_compact"):
+            _handle_post_compact(otel, payload, state_dir)
+        elif event in ("InstructionsLoaded", "instructions_loaded"):
+            _handle_instructions_loaded(otel, payload, state_dir)
+        elif event in ("PreToolUse", "pre_tool_use",
+                       "PostToolUse", "post_tool_use",
+                       "PostToolUseFailure", "post_tool_use_failure"):
             tool_name = payload.get("tool_name") or payload.get("toolName") or ""
             tool_input = payload.get("tool_input") or {}
             raw_tool_use_id = (
@@ -646,12 +802,20 @@ def main():
             # so strip anything that could escape the state dir.
             tool_use_id = _safe_name(raw_tool_use_id, fallback_prefix="tu")
             is_subagent = tool_name in SUBAGENT_TOOLS
+            is_failure = event in ("PostToolUseFailure", "post_tool_use_failure")
             if event in ("PreToolUse", "pre_tool_use"):
                 if is_subagent:
                     _handle_subagent_pre(otel, payload, state_dir, tool_use_id)
                 else:
                     _handle_inner_pre(payload, state_dir, tool_use_id)
             else:
+                # PostToolUseFailure carries the error tool_result. Force the
+                # is_error attribute so the span status reflects the failure
+                # even when the payload doesn't set isError explicitly.
+                if is_failure:
+                    tr = payload.setdefault("tool_response", {})
+                    if isinstance(tr, dict):
+                        tr.setdefault("isError", True)
                 if is_subagent:
                     _handle_subagent_post(otel, payload, state_dir, tool_use_id)
                 else:

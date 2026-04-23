@@ -134,18 +134,19 @@ fi
 SETTINGS_SNIPPET=$(cat <<JSON
 {
   "hooks": {
-    "UserPromptSubmit": [
-      { "hooks": [ { "type": "command", "command": "$HOOK_CMD" } ] }
-    ],
-    "PreToolUse": [
-      { "matcher": ".*", "hooks": [ { "type": "command", "command": "$HOOK_CMD" } ] }
-    ],
-    "PostToolUse": [
-      { "matcher": ".*", "hooks": [ { "type": "command", "command": "$HOOK_CMD" } ] }
-    ],
-    "Stop": [
-      { "hooks": [ { "type": "command", "command": "$HOOK_CMD" } ] }
-    ]
+    "SessionStart":       [ { "hooks": [ { "type": "command", "command": "$HOOK_CMD" } ] } ],
+    "UserPromptSubmit":   [ { "hooks": [ { "type": "command", "command": "$HOOK_CMD" } ] } ],
+    "PreToolUse":         [ { "matcher": ".*", "hooks": [ { "type": "command", "command": "$HOOK_CMD" } ] } ],
+    "PostToolUse":        [ { "matcher": ".*", "hooks": [ { "type": "command", "command": "$HOOK_CMD" } ] } ],
+    "PostToolUseFailure": [ { "matcher": ".*", "hooks": [ { "type": "command", "command": "$HOOK_CMD" } ] } ],
+    "PermissionRequest":  [ { "matcher": ".*", "hooks": [ { "type": "command", "command": "$HOOK_CMD" } ] } ],
+    "PermissionDenied":   [ { "matcher": ".*", "hooks": [ { "type": "command", "command": "$HOOK_CMD" } ] } ],
+    "PreCompact":         [ { "hooks": [ { "type": "command", "command": "$HOOK_CMD" } ] } ],
+    "PostCompact":        [ { "hooks": [ { "type": "command", "command": "$HOOK_CMD" } ] } ],
+    "InstructionsLoaded": [ { "hooks": [ { "type": "command", "command": "$HOOK_CMD" } ] } ],
+    "Stop":               [ { "hooks": [ { "type": "command", "command": "$HOOK_CMD" } ] } ],
+    "StopFailure":        [ { "hooks": [ { "type": "command", "command": "$HOOK_CMD" } ] } ],
+    "SessionEnd":         [ { "hooks": [ { "type": "command", "command": "$HOOK_CMD" } ] } ]
   }
 }
 JSON
@@ -183,10 +184,19 @@ def upsert(event, entry):
     ]
     items.append(entry)
 plain = {"type": "command", "command": cmd}
-upsert("UserPromptSubmit", {"hooks": [plain]})
-upsert("PreToolUse",       {"matcher": ".*", "hooks": [plain]})
-upsert("PostToolUse",      {"matcher": ".*", "hooks": [plain]})
-upsert("Stop",             {"hooks": [plain]})
+upsert("SessionStart",         {"hooks": [plain]})
+upsert("UserPromptSubmit",     {"hooks": [plain]})
+upsert("PreToolUse",           {"matcher": ".*", "hooks": [plain]})
+upsert("PostToolUse",          {"matcher": ".*", "hooks": [plain]})
+upsert("PostToolUseFailure",   {"matcher": ".*", "hooks": [plain]})
+upsert("PermissionRequest",    {"matcher": ".*", "hooks": [plain]})
+upsert("PermissionDenied",     {"matcher": ".*", "hooks": [plain]})
+upsert("PreCompact",           {"hooks": [plain]})
+upsert("PostCompact",          {"hooks": [plain]})
+upsert("InstructionsLoaded",   {"hooks": [plain]})
+upsert("Stop",                 {"hooks": [plain]})
+upsert("StopFailure",          {"hooks": [plain]})
+upsert("SessionEnd",           {"hooks": [plain]})
 with open(path, "w") as f:
     json.dump(data, f, indent=2)
     f.write("\n")
