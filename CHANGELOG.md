@@ -5,6 +5,31 @@ All notable changes to Claude Forge will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-04-23
+
+### Added
+
+- **Mutational Tool Tracing** — `Write`, `Edit`, `MultiEdit`, and `Bash` calls inside each subagent now emit child spans by default (no env var required), surfacing what each subagent actually changed/ran. Disable with `CLAUDE_FORGE_TRACE_MUTATIONS=0`. `CLAUDE_FORGE_TRACE_INNER=1` still exists for tracing read-only inner tools (Read/Glob/Grep/etc.) when deep debugging is needed
+- **Eight Additional Hook Events** wired into `trace_subagents.py`:
+  - `SessionStart` — canonical root-anchor trigger (UserPromptSubmit becomes the defensive fallback for resumed sessions)
+  - `SessionEnd` — canonical end-of-session signal
+  - `StopFailure` — API-error session aborts now produce a `session_complete` span with `is_error=true` instead of leaving a dangling `_root.json`
+  - `PostToolUseFailure` — failed Agent calls now emit a `subagent_result` span with error status (was: orphan state files, no result span)
+  - `PermissionRequest` / `PermissionDenied` — emit `permission_*:<tool>` spans parented to the active subagent so blocked operations are visible in Jaeger instead of silent
+  - `PreCompact` / `PostCompact` — emit a `compaction` span with real duration, anchoring post-compaction agent behavior changes in time
+  - `InstructionsLoaded` — emits an `instructions.loaded` span with the file path so trace consumers can see when CLAUDE.md or rule files shape behavior
+- **Tracing Update Documentation** — README "Updating tracing" subsection covers the `/plugin marketplace update claude-forge` → `forge-trace` cycle so users know how to refresh the shared hook after a release. Includes a `forge-trace` shell-function tip for one-line invocation
+
+### Changed
+
+- **`session_complete` Idempotent** — `Stop`, `SessionEnd`, and `StopFailure` all funnel through one helper that flips a `complete_emitted` flag in `_root.json`. Stop now safely fires per-turn without producing duplicate session_complete spans
+- **Plugin Source Protocol** — `.claude-plugin/marketplace.json` declares `source: url` with an explicit `https://` URL instead of `source: github`, avoiding Claude Code's SSH default and the resulting `No ED25519 host key is known for github.com` failures on machines without SSH set up
+- **Plugin Version** bumped to `1.5.0` in both `plugin.json` and `marketplace.json` (was lagging at 1.3.0/1.4.0)
+
+### Fixed
+
+- **Failed Agent Calls Now Visible in Jaeger** — Agent tool calls returning `is_error: true` previously triggered `PostToolUseFailure` (a separate event from `PostToolUse`), which was unhandled. State files orphaned, no `subagent_result` span emitted. Now handled with forced `is_error=true` on the result span
+
 ## [1.4.0] - 2026-04-21
 
 ### Added
