@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
- <a href="https://portfolio.hatstack.fun/read/post/Claude-Forge">Blog Post</a> · <a href="docs/ARCHITECTURE.md">Architecture Deep Dive</a>
+ <a href="https://portfolio.hatstack.fun/read/post/Claude-Forge">Blog Post</a> · <a href="docs/ARCHITECTURE.md">Architecture Deep Dive</a> · <a href="https://portfolio.hatstack.fun/read/post/Jaeger-Tracing-In-Multi-Agent-Systems"> Tracing</a>
 </p>
 
 Adversarial multi-agent pipeline for Claude Code. Separate AI agents generate and critique each other's work in adversarial feedback loops, where generators produce artifacts, discriminators validate them, and iteration drives convergence. Each agent runs in its own context window with fresh perspective.
