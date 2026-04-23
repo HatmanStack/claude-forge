@@ -206,8 +206,10 @@ If you installed Claude Forge as a plugin (`/plugin install forge@claude-forge`)
 
 ```bash
 cd your-project
-bash "$(find ~/.claude -path '*/forge*' -name install-tracing.sh 2>/dev/null | head -1)"
+bash "$(find ~/.claude -path '*/forge*/bin/install-tracing.sh' 2>/dev/null | sort -V | tail -1)"
 ```
+
+> ⚠️ The `sort -V | tail -1` picks the **latest** cached plugin version. Plain `head -1` will silently pick whatever filesystem iteration order returns first — which is *not* always the newest after you've done a few upgrades, and will roll your deployed hook back to a stale snapshot.
 
 The script:
 - Creates a dedicated venv at `~/.local/share/claude-forge/venv` (uses [`uv`](https://astral.sh/uv) if installed, otherwise `python3 -m venv`)
@@ -223,7 +225,11 @@ Flags: `--no-settings` (install only, print snippet), `--uninstall` (remove the 
 ```bash
 forge-trace() {
   local s
-  s=$(find ~/.claude -path '*/forge*' -name install-tracing.sh 2>/dev/null | head -1)
+  # IMPORTANT: sort -V | tail -1 picks the LATEST cached plugin version.
+  # Plain `head -1` returns whatever filesystem iteration order produces,
+  # which silently picks an old version once you've upgraded — making
+  # forge-trace roll your hook back to a stale snapshot.
+  s=$(find ~/.claude -path '*/forge*/bin/install-tracing.sh' 2>/dev/null | sort -V | tail -1)
   [[ -z "$s" ]] && { echo "forge plugin not installed"; return 1; }
   bash "$s" "$@"
 }
@@ -258,7 +264,7 @@ then in a shell, from any project:
 ```bash
 forge-trace                                # 3. deploy the refreshed hook (copies plugin cache → ~/.local/share/claude-forge/)
 # or, without the alias:
-bash "$(find ~/.claude -path '*/forge*' -name install-tracing.sh 2>/dev/null | head -1)"
+bash "$(find ~/.claude -path '*/forge*/bin/install-tracing.sh' 2>/dev/null | sort -V | tail -1)"
 ```
 
 **Why all three:** `/plugin marketplace update` only refreshes the *index* of available versions — it does not touch any installed plugin. `/plugin install forge@claude-forge` is what actually upgrades your installed plugin to the new version. Without that step, the plugin cache stays at whatever version you originally installed (e.g. `forge/1.3.2/`), and `forge-trace` will dutifully copy *that* old hook on top of any newer one you'd manually deployed — silently rolling back your tracing.
