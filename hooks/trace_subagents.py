@@ -542,14 +542,33 @@ def _handle_instructions_loaded(otel, payload, state_dir):
     _safe_flush(otel)
 
 
-def _agent_name_from_payload(tool_input, tool_name, state_dir):
+def _lookup_agent_id_in_meta(transcript_path, agent_id):
+    """Resolve an agent_id to its description by reading the per-subagent
+    meta.json that Claude Code writes alongside each subagent's transcript:
+        <session>/subagents/agent-<id>.meta.json
+    Returns description string or "" on miss.
+    """
+    if not transcript_path or not agent_id:
+        return ""
+    base = transcript_path[:-6] if transcript_path.endswith(".jsonl") else transcript_path
+    meta = Path(base) / "subagents" / f"agent-{agent_id}.meta.json"
+    if not meta.exists():
+        return ""
+    try:
+        d = json.loads(meta.read_text())
+        return d.get("description") or ""
+    except Exception:
+        return ""
+
+
+def _agent_name_from_payload(tool_input, tool_name, state_dir, transcript_path=""):
     """Pick the most descriptive label for a span.
 
     - Agent payloads have a `description` ("Planner: unified audit remediation
       plan") and `name` ("planner"). Prefer description.
     - SendMessage payloads have `to` (role-name OR agent-id) and `summary`.
-      Look up `to` in the saved name->description map; if found use that, else
-      fall back to summary or `to` itself.
+      Resolution order: saved name map → meta.json on disk (for agent-ids) →
+      fall back to the raw `to` value.
     """
     if tool_name == "SendMessage":
         to = (tool_input.get("to") or tool_input.get("recipient") or "").strip()
@@ -558,6 +577,22 @@ def _agent_name_from_payload(tool_input, tool_name, state_dir):
             name = mapped.get(to) or mapped.get(to.lower())
             if name:
                 return f"{name} (continued)"
+            # Agent-id form ("a987f5c0d71bc551c") — agent_ids aren't in the
+            # Agent tool's response, so the saved name map only has role
+            # entries. Fall back to the per-subagent meta.json that Claude
+            # Code writes alongside each subagent's transcript.
+            desc = _lookup_agent_id_in_meta(transcript_path, to)
+            if desc:
+                # Cache for next time so subsequent SendMessages by the same
+                # id don't re-read the file.
+                try:
+                    f = state_dir / "_agent_names.json"
+                    cur = json.loads(f.read_text()) if f.exists() else {}
+                    cur[to] = desc
+                    f.write_text(json.dumps(cur))
+                except Exception:
+                    pass
+                return f"{desc} (continued)"
             return to + " (continued)"
         return tool_input.get("summary") or "send_message"
     return (
@@ -592,7 +627,10 @@ def _handle_subagent_pre(otel, payload, state_dir, tool_use_id):
     # Save role-name → description so SendMessage Pre can resolve to that.
     if tool_name == "Agent":
         _record_agent_name(state_dir, tool_input)
-    name = _agent_name_from_payload(tool_input, tool_name, state_dir)
+    name = _agent_name_from_payload(
+        tool_input, tool_name, state_dir,
+        transcript_path=payload.get("transcript_path") or "",
+    )
     start_ns = time.time_ns()
     # Defensive: if UserPromptSubmit didn't fire (or fired with a different
     # session_id), create a root anchor now so this subagent — and all that
