@@ -223,6 +223,17 @@ def _find_subagent_transcript(parent_transcript, description, start_ns, end_ns):
     sub_dir = Path(base) / "subagents"
     if not sub_dir.is_dir():
         return ""
+    # SendMessage anchor names get a "(continued)" suffix from the naming
+    # helper; meta.json descriptions don't have that suffix. Strip it before
+    # matching so SendMessage events resolve back to the same transcript file
+    # the original Agent spawn does.
+    norm_desc = description.removesuffix(" (continued)").strip()
+    # If the "description" we got is actually an agent_id (16-char hex), look
+    # the meta file directly by name instead of scanning for descriptions.
+    if len(norm_desc) >= 12 and all(c in "0123456789abcdef" for c in norm_desc.lower()):
+        direct = sub_dir / f"agent-{norm_desc}.jsonl"
+        if direct.exists():
+            return str(direct)
     candidates = []
     try:
         for meta in sub_dir.glob("agent-*.meta.json"):
@@ -230,7 +241,7 @@ def _find_subagent_transcript(parent_transcript, description, start_ns, end_ns):
                 m = json.loads(meta.read_text())
             except Exception:
                 continue
-            if m.get("description") != description:
+            if m.get("description") != norm_desc:
                 continue
             jsonl = meta.with_name(meta.name.replace(".meta.json", ".jsonl"))
             if jsonl.exists():
@@ -743,6 +754,12 @@ def _emit_subagent_inner_spans(otel, transcript_path, parent_carrier, agent_name
     except Exception:
         return
 
+    # Skip tool_uses with timestamps before anchor_start_ns. This matters for
+    # SendMessage continuations: the same per-subagent transcript is shared
+    # across the original Agent spawn + every SendMessage to that agent. Each
+    # post-event runs synth and we'd re-emit the same spans without this guard.
+    # anchor_start_ns is the SendMessage's Pre time, so only tool_uses that
+    # happened during this SendMessage window get emitted.
     emitted = 0
     for tid, use in tool_uses.items():
         tool_name = use["name"]
@@ -753,6 +770,9 @@ def _emit_subagent_inner_spans(otel, transcript_path, parent_carrier, agent_name
         end_ns = result.get("ts_ns") or anchor_end_ns
         if not end_ns or end_ns < start_ns:
             end_ns = start_ns + 1
+        # Only emit tool spans that fall within this anchor's window
+        if anchor_start_ns and start_ns < anchor_start_ns:
+            continue
 
         span = otel["tracer"].start_span(
             f"tool:{tool_name}", context=parent_ctx, start_time=start_ns
