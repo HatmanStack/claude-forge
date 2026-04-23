@@ -649,6 +649,102 @@ def _handle_subagent_pre(otel, payload, state_dir, tool_use_id):
     _safe_flush(otel)
 
 
+def _emit_subagent_inner_spans(otel, transcript_path, parent_carrier, agent_name,
+                               anchor_start_ns, anchor_end_ns):
+    """Synthesize tool:<name> spans from a subagent's per-agent JSONL transcript.
+
+    Workaround for Claude Code issue #34692 (subagent tool calls don't fire
+    the parent's PreToolUse/PostToolUse hooks). The subagent's own transcript
+    records every tool_use + tool_result with timestamps; we walk it after
+    the subagent finishes and emit retroactive spans parented to the subagent
+    anchor so the trace tree shows what each subagent actually did.
+
+    Honors the same gates as live inner-tool tracing (_should_trace_inner):
+    mutational tools (Write/Edit/MultiEdit/Bash) by default, others require
+    CLAUDE_FORGE_TRACE_INNER=1, INNER_TOOL_BLOCKLIST drops Read/Glob/Grep/etc.
+    """
+    if not transcript_path:
+        return
+    p = Path(transcript_path)
+    if not p.exists():
+        return
+
+    parent_ctx = otel["propagator"].extract(carrier=parent_carrier or {})
+    tool_uses = {}      # tool_use_id -> {name, input, ts_ns}
+    tool_results = {}   # tool_use_id -> {content, is_error, ts_ns}
+
+    try:
+        with p.open() as f:
+            for line in f:
+                try:
+                    d = json.loads(line)
+                except Exception:
+                    continue
+                ts_ns = _parse_ts(d.get("timestamp"))
+                msg = d.get("message") or {}
+                if d.get("type") == "assistant":
+                    for c in (msg.get("content") or []):
+                        if isinstance(c, dict) and c.get("type") == "tool_use":
+                            tid = c.get("id") or ""
+                            if tid:
+                                tool_uses[tid] = {
+                                    "name": c.get("name") or "?",
+                                    "input": c.get("input") or {},
+                                    "ts_ns": ts_ns,
+                                }
+                elif d.get("type") == "user":
+                    for c in (msg.get("content") or []):
+                        if isinstance(c, dict) and c.get("type") == "tool_result":
+                            tid = c.get("tool_use_id") or ""
+                            if tid:
+                                tool_results[tid] = {
+                                    "content": c.get("content"),
+                                    "is_error": bool(c.get("is_error")),
+                                    "ts_ns": ts_ns,
+                                }
+    except Exception:
+        return
+
+    emitted = 0
+    for tid, use in tool_uses.items():
+        tool_name = use["name"]
+        if not _should_trace_inner(tool_name):
+            continue
+        result = tool_results.get(tid, {})
+        start_ns = use.get("ts_ns") or anchor_start_ns
+        end_ns = result.get("ts_ns") or anchor_end_ns
+        if not end_ns or end_ns < start_ns:
+            end_ns = start_ns + 1
+
+        span = otel["tracer"].start_span(
+            f"tool:{tool_name}", context=parent_ctx, start_time=start_ns
+        )
+        span.set_attribute("tool.name", tool_name)
+        span.set_attribute("tool.duration_ms", (end_ns - start_ns) // 1_000_000)
+        span.set_attribute("agent.name", agent_name or "")
+        try:
+            span.set_attribute(
+                "tool.input",
+                _truncate(json.dumps(use.get("input") or {}, default=str), INPUT_LIMIT),
+            )
+        except Exception:
+            pass
+        is_error = bool(result.get("is_error"))
+        span.set_attribute("tool.is_error", is_error)
+        content = result.get("content")
+        if isinstance(content, list):
+            content = "\n".join(b.get("text", "") for b in content if isinstance(b, dict))
+        if isinstance(content, str):
+            span.set_attribute("tool.output", _truncate(content, OUTPUT_LIMIT))
+        if is_error:
+            span.set_status(otel["Status"](otel["StatusCode"].ERROR, "tool reported error"))
+        span.end(end_time=end_ns)
+        emitted += 1
+
+    if emitted:
+        _safe_flush(otel)
+
+
 def _handle_subagent_post(otel, payload, state_dir, tool_use_id):
     state_file = state_dir / f"agent_{tool_use_id}.json"
     if not state_file.exists():
@@ -681,6 +777,7 @@ def _handle_subagent_post(otel, payload, state_dir, tool_use_id):
         or saved.get("transcript_path")
         or ""
     )
+    sub_jsonl = ""
     if transcript:
         # Each subagent has its own JSONL under <session>/subagents/. Locate it
         # by matching description, then sum its assistant usage. Falls back to
@@ -696,6 +793,21 @@ def _handle_subagent_post(otel, payload, state_dir, tool_use_id):
         _set_usage_attrs(span, "agent.tokens", usage)
 
     span.end(end_time=end_ns)
+
+    # After the result span is sealed, retroactively emit tool:<name> spans
+    # for every tool the subagent invoked internally — Claude Code's hook
+    # subsystem doesn't fire for subagent tools (issues #34692/#18392), so
+    # we synthesize them from the subagent's own JSONL transcript.
+    if sub_jsonl:
+        _emit_subagent_inner_spans(
+            otel,
+            transcript_path=sub_jsonl,
+            parent_carrier=saved.get("carrier") or {},
+            agent_name=saved.get("name") or "",
+            anchor_start_ns=start_ns,
+            anchor_end_ns=end_ns,
+        )
+
     _safe_flush(otel)
 
     try:
