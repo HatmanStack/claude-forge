@@ -5,6 +5,13 @@ All notable changes to Claude Forge will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.2] - 2026-04-24
+
+### Changed
+
+- **`Bash` removed from default mutation set** — A typical `/forge:pipeline` run invokes `Bash` hundreds of times (git status, npm test, ls, cat, file inspection, etc.). With `Bash` in the default mutation set, those spans drowned out the `Write`/`Edit` activity that actually shows what the subagent changed. Default `MUTATION_TOOLS` is now `Write,Edit,MultiEdit`. Add `Bash` back via `CLAUDE_FORGE_TRACE_MUTATION_TOOLS="Write,Edit,MultiEdit,Bash"` if you want it
+- **`MUTATION_TOOLS` is now env-overridable** — same pattern as `INNER_TOOL_BLOCKLIST`, via `CLAUDE_FORGE_TRACE_MUTATION_TOOLS`. README env-var table updated
+
 ## [1.6.1] - 2026-04-23
 
 ### Fixed

@@ -69,9 +69,19 @@ DEBUG_LOG = (
 )
 
 # Mutational tools are traced by default — they're the signal of "what each
-# subagent actually changed/ran" and there are few enough of them per run that
-# they don't clutter the trace tree. Disable with CLAUDE_FORGE_TRACE_MUTATIONS=0.
-MUTATION_TOOLS = {"Write", "Edit", "MultiEdit", "Bash"}
+# subagent actually changed." Bash is intentionally excluded from the default
+# set because a typical pipeline run invokes it hundreds of times (git, npm,
+# tests, file inspection) and drowns out Write/Edit visibility. Add it back
+# via CLAUDE_FORGE_TRACE_MUTATION_TOOLS if you need Bash spans.
+#
+# Override via CLAUDE_FORGE_TRACE_MUTATION_TOOLS (comma-separated list).
+# Disable the whole category via CLAUDE_FORGE_TRACE_MUTATIONS=0.
+_default_mutations = "Write,Edit,MultiEdit"
+MUTATION_TOOLS = {
+    s.strip()
+    for s in os.environ.get("CLAUDE_FORGE_TRACE_MUTATION_TOOLS", _default_mutations).split(",")
+    if s.strip()
+}
 TRACE_MUTATIONS = os.environ.get("CLAUDE_FORGE_TRACE_MUTATIONS", "1").strip().lower() not in (
     "0", "false", "no", "off", ""
 )

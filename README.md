@@ -283,7 +283,8 @@ The deployed hook lives at `~/.local/share/claude-forge/trace_subagents.py`. Eve
 | Variable | Default | Purpose |
 |---|---|---|
 | `CLAUDE_FORGE_TRACING` | unset | Master on/off — hook is a no-op without this |
-| `CLAUDE_FORGE_TRACE_MUTATIONS` | `1` (on) | Trace each subagent's mutational tool calls (`Write`, `Edit`, `MultiEdit`, `Bash`) as child spans. On by default — these show *what* each subagent changed. Set to `0` for pure agent-level traces. |
+| `CLAUDE_FORGE_TRACE_MUTATIONS` | `1` (on) | Trace each subagent's mutational tool calls as child spans. On by default — these show *what* each subagent changed. Set to `0` for pure agent-level traces. |
+| `CLAUDE_FORGE_TRACE_MUTATION_TOOLS` | `Write,Edit,MultiEdit` | Comma-separated list of tools traced as mutations. `Bash` is **excluded by default** because pipeline runs invoke it hundreds of times (git, npm, tests, ls) and the noise drowns out Write/Edit visibility. Add it back via `CLAUDE_FORGE_TRACE_MUTATION_TOOLS="Write,Edit,MultiEdit,Bash"` if you need Bash spans. |
 | `CLAUDE_FORGE_TRACE_INNER` | unset | Also trace *non-mutational* inner tools (Read/Glob/Grep/etc.). Off by default — a `/pipeline` can fire 200+ such calls. |
 | `CLAUDE_FORGE_TRACE_TOOL_BLOCKLIST` | `Read,Glob,Grep,TodoWrite,NotebookRead` | When inner tracing is on, comma-separated tools to skip. Empty string disables the blocklist |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4317` | OTLP/gRPC endpoint for any backend (Jaeger, Tempo, Honeycomb, etc.) |
