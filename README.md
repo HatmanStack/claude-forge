@@ -288,6 +288,8 @@ The deployed hook lives at `~/.local/share/claude-forge/trace_subagents.py`. Eve
 | `CLAUDE_FORGE_TRACE_INNER` | unset | Also trace *non-mutational* inner tools (Read/Glob/Grep/etc.). Off by default — a `/pipeline` can fire 200+ such calls. |
 | `CLAUDE_FORGE_TRACE_TOOL_BLOCKLIST` | `Read,Glob,Grep,TodoWrite,NotebookRead` | When inner tracing is on, comma-separated tools to skip. Empty string disables the blocklist |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4317` | OTLP/gRPC endpoint for any backend (Jaeger, Tempo, Honeycomb, etc.) |
+| `CLAUDE_FORGE_PHASE_TARGET_TOKENS` | `150000` | Target token budget per pipeline phase (Stage size). Read by the Planner when sizing phases and by the Plan Reviewer when judging them. Smaller values produce more, smaller phases; larger values produce fewer, larger phases. |
+| `CLAUDE_FORGE_PHASE_MAX_TOKENS` | `250000` | Hard ceiling per phase — Planner must not exceed this and Plan Reviewer flags phases above it (context-pressure risk). |
 
 ## License
 

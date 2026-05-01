@@ -71,9 +71,17 @@ Simulate the implementation engineer's experience:
 - [ ] **CI Compatibility**: Tests can run in isolated CI environment
 
 ### 4. Token Budget
-- [ ] **Phase Size**: Phases are sized to the scope of work — ~50k tokens is a guideline for large features, not a hard target
+
+Read the configured budget from the environment before judging phase sizes:
+
+```bash
+echo "${CLAUDE_FORGE_PHASE_TARGET_TOKENS:-150000}"  # target per phase
+echo "${CLAUDE_FORGE_PHASE_MAX_TOKENS:-250000}"     # hard ceiling per phase
+```
+
+- [ ] **Phase Size**: Phases are sized to the scope of work — `$CLAUDE_FORGE_PHASE_TARGET_TOKENS` (default 150k) is a guideline for large features, not a hard target
 - [ ] **Single-Phase OK**: For small scopes (remediation, cleanup), a single phase is fine — don't artificially split
-- [ ] **Hard Ceiling**: No phase should exceed ~75k tokens (context pressure risk)
+- [ ] **Hard Ceiling**: No phase should exceed `$CLAUDE_FORGE_PHASE_MAX_TOKENS` (default 250k) — context pressure risk
 - [ ] **No Padding**: Don't flag small phases as too small unless they could be trivially combined with an adjacent phase doing related work
 
 ### 5. Adversarial Checks

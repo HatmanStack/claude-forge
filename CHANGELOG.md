@@ -5,6 +5,12 @@ All notable changes to Claude Forge will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] - 2026-05-01
+
+### Added
+
+- **Configurable phase token budget** — Two new env vars expose the per-stage size that the Planner and Plan Reviewer enforce: `CLAUDE_FORGE_PHASE_TARGET_TOKENS` (default `150000`) sets the target per phase and `CLAUDE_FORGE_PHASE_MAX_TOKENS` (default `250000`) sets the hard ceiling. Previously these were hardcoded as `~50k`/`~75k` text in the role prompts, which made tuning the size of a Stage require editing the skill files. `skills/pipeline/planner.md` and `skills/pipeline/plan_reviewer.md` now read the values from the environment at runtime; README env-var table updated. Defaults raised from prior `50k`/`75k` guidance to `150k`/`250k` to better reflect current context windows
+
 ## [1.6.2] - 2026-04-24
 
 ### Changed

@@ -14,7 +14,7 @@
         "url": "https://github.com/HatmanStack/claude-forge.git"
       },
       "description": "Adversarial multi-agent pipeline for Claude Code. Generators produce artifacts, discriminators validate them, and adversarial feedback loops drive convergence.",
-      "version": "1.6.2",
+      "version": "1.7.0",
       "license": "MIT",
       "keywords": ["pipeline", "multi-agent", "adversarial", "code-review", "audit", "evaluation"],
       "category": "development"

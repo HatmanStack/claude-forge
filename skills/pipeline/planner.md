@@ -93,7 +93,8 @@ Create implementation plan files in markdown format using the **Write** tool.
    |       |                                               |  |
    |       v                                               |  |
    |  [ Phase-1.md ] -> [ Phase-2.md ] -> [ Phase-N.md ]   |  |
-   |  (~50k Tok)        (~50k Tok)        (~50k Tok)       |  |
+   |  (~target Tok)     (~target Tok)     (~target Tok)    |  |
+   |  (target = $CLAUDE_FORGE_PHASE_TARGET_TOKENS, def 150k)| |
    |       ^                 ^                 ^           |  |
    |       |                 |                 |           |  |
    |       `----(Inherits Patterns & Config)--'------------'  |
@@ -102,11 +103,19 @@ Create implementation plan files in markdown format using the **Write** tool.
 ```
 
 **Token Strategy (Guideline, not hard target):**
-* **~50k tokens per phase** is the target for large features (fits in one context window)
+
+Read the per-phase budget from the environment before sizing phases:
+
+```bash
+echo "${CLAUDE_FORGE_PHASE_TARGET_TOKENS:-150000}"  # target per phase
+echo "${CLAUDE_FORGE_PHASE_MAX_TOKENS:-250000}"     # hard ceiling per phase
+```
+
+* **`$CLAUDE_FORGE_PHASE_TARGET_TOKENS` (default 150000) tokens per phase** is the target for large features (fits in one context window)
 * For smaller scopes (remediation, cleanup, simple features): phases can be much smaller — size to the work, not the budget
 * Only split into multiple phases when the work genuinely exceeds a single context window
 * A single-phase plan is fine if the scope fits
-* Hard limits: no phase should exceed ~75k tokens (context pressure risk)
+* Hard limits: no phase should exceed `$CLAUDE_FORGE_PHASE_MAX_TOKENS` (default 250000) tokens — context pressure risk
 * Plan should be **branch agnostic**
 
 ### Files to Create
@@ -131,7 +140,7 @@ Create implementation plan files in markdown format using the **Write** tool.
 * Commit message format (conventional commits)
 
 #### 5. `Phase-N.md` (One file per implementation phase)
-* Each phase ~50,000 tokens
+* Each phase ~`$CLAUDE_FORGE_PHASE_TARGET_TOKENS` tokens (default 150,000)
 * Sequential order with clear dependencies
 * Each phase builds on previous phases
 
