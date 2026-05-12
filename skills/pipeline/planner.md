@@ -24,12 +24,15 @@ All plan files must pass markdownlint. Follow these rules in every file you crea
 - **Blank lines** required before and after headings, code blocks, and lists
 
 ### Target Engineer Profile
-* Skilled developer with **zero context** on this codebase
-* Unfamiliar with toolset and problem domain
-* May need guidance on test design patterns and mocking strategies
-* Will follow instructions precisely
-* **Will not deviate from the plan**
-* **Will not infer missing details** — if it's not in the plan, it won't happen
+
+The implementer is an **AI coding agent** with full tool access — Read, Glob, Grep, Bash, Write, Edit, and the rest. Plan for that capability:
+
+* The implementer **can and will explore the codebase** to discover patterns, conventions, signatures, and existing utilities before writing code
+* The implementer **can read prior phases, tests, and `CLAUDE.md`** to recover context you don't restate
+* The implementer **can choose appropriate libraries, naming, and structure** when the plan defines goals and constraints rather than line-by-line steps
+* You do **not** need to pre-write the implementation. Pre-written recipes are usually wrong or stale by the time the implementer reads them, and they discourage the agent from validating against the actual code
+
+Your job is to **sequence work correctly and define done** — what to build, where it lives, which conventions to match, what must remain true, and what makes the task verifiably complete. The implementer figures out the how.
 
 ### Development Principles
 1. **DRY** (Don't Repeat Yourself)
@@ -160,34 +163,27 @@ For each `Phase-N.md`, include:
 * Environment requirements
 
 ### 3. Tasks
-Use this template for each task:
+
+Use this template for each task. Define **what** and **done**, not **how** — the implementer is an AI agent that will explore the codebase and choose the implementation approach.
 
 > **Task N: [Clear, Descriptive Name]**
 >
-> **Goal:** What we're building and why
+> **Goal:** What we're building and why it matters (1–3 sentences). Capture the outcome the user cares about, not the mechanics.
 >
-> **Files to Modify/Create:**
-> * `path/to/file1.ext` - Brief description
-> * `path/to/file2.ext` - Brief description
+> **Scope:**
+> * Files to create or modify: `path/to/file1.ext`, `path/to/file2.ext` (or a glob like `src/handlers/*.ts` when the exact set must be discovered)
+> * Patterns/conventions to follow: name the existing module, function, or test the implementer should mirror (e.g. "follow the error-handling style in `src/api/users.ts`", "match the fixture layout in `tests/fixtures/auth/`")
+> * Out of scope: anything an implementer might reasonably do but should not, in this task
 >
-> **Prerequisites:**
-> * Task dependencies
-> * Required context
+> **Constraints:**
+> * Invariants that must hold (e.g. "public API of `Foo` must not change", "no new runtime dependencies", "no live network calls in tests")
+> * Conventions that must be matched (commit format, naming, module layout)
+> * Compatibility/migration requirements that survive past this task
 >
-> **Implementation Steps:**
-> * High-level guidance (not exact commands)
-> * Let engineer determine best approach
-> * Describe design patterns to follow
->
-> **Verification Checklist:**
-> * [ ] Specific, testable criteria
-> * [ ] Can be verified via local tests
-> * [ ] No subjective measures
->
-> **Testing Instructions:**
-> * Unit tests to write
-> * Integration tests (with mocks, no live cloud resources)
-> * How to run tests
+> **Acceptance Criteria:**
+> * [ ] Specific, testable pass/fail checks — what must be true when the task is done
+> * [ ] At least one criterion an automated test or `Bash`-checkable command can verify (e.g. "`pytest tests/test_x.py` passes", "`rg 'old_api(' src/` returns no matches")
+> * [ ] Edge cases that must be covered, stated as criteria not as instructions
 >
 > **Commit Message Template:**
 > ```text
@@ -196,6 +192,13 @@ Use this template for each task:
 > - Detail 1
 > - Detail 2
 > ```
+
+**What to avoid in tasks:**
+
+* Step-by-step procedural recipes ("first do X, then do Y, then run Z") — the agent will explore and sequence its own work
+* Pasting function signatures, code skeletons, or pseudocode the implementer is expected to type out
+* Restating conventions already present in `CLAUDE.md` or Phase-0.md — reference them instead
+* Speculative implementation choices ("use a singleton", "use a decorator") unless the constraint actually requires that pattern; otherwise let the implementer pick
 
 ### 4. Phase Verification
 * How to verify entire phase is complete
