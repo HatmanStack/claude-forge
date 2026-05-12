@@ -88,10 +88,10 @@ The planner reads ALL intake docs and creates ONE unified plan.
 
 ### 1a: Spawn Planner
 
-**Agent naming:** All spawns follow the convention in `pipeline-protocol.md` — pass an explicit `name` at spawn and reuse it in every `SendMessage`. Phase tags (`[HYGIENIST]`, `[FORTIFIER]`, etc.) select the role prompt but do not change the addressable name: phase N is always `implementer-phase-N` / `reviewer-phase-N`.
+**Agent addressing:** All spawns follow the convention in `pipeline-protocol.md` — pass an explicit `name` at spawn as a human-readable label, then **capture the returned `agentId`** and use that captured id in every subsequent `SendMessage(to=...)`. The `name` is not a routable address once the Agent call returns. Phase tags (`[HYGIENIST]`, `[FORTIFIER]`, etc.) select the role prompt but do not change the label: phase N is always labeled `implementer-phase-N` / `reviewer-phase-N`.
 
 - **Read** `planner.md` for the role prompt
-- Spawn an **Agent** with `name="planner"`:
+- Spawn an **Agent** with `name="planner"` (label only) and **capture the returned `agentId`** for subsequent SendMessage calls:
 
 ```xml
 <role_prompt>
@@ -128,7 +128,7 @@ When complete, end with: PLAN_COMPLETE
 
 ### 1a (Re-entry): Spawn Planner After Re-Evaluation
 
-When looping back from Stage 3 (Verification) with unverified items, reuse the existing planner via `SendMessage(to="planner", ...)` rather than spawning a new agent. If the planner is no longer addressable (new session), spawn a fresh one with `name="planner"`:
+When looping back from Stage 3 (Verification) with unverified items, reuse the existing planner via `SendMessage(to=<captured planner agentId>, ...)` rather than spawning a new agent. If you no longer have the captured `agentId` (new session, missing scratch state), spawn a fresh planner with `name="planner"` (label) and capture its new `agentId`:
 
 ```xml
 <role_prompt>
@@ -180,7 +180,7 @@ For each phase, read the phase title to determine the tag, then spawn the correc
 - Implementer: **Read** `doc-engineer.md`, spawn with doc engineer role prompt
 - Reviewer: **Read** `doc-reviewer.md`, spawn with doc reviewer role prompt
 
-Agent spawn format is the same as main SKILL.md Stage 2, substituting the appropriate role prompt per phase tag. Use `name="implementer-phase-N"` and `name="reviewer-phase-N"` regardless of which role prompt was loaded — the tag picks the prompt, not the name.
+Agent spawn format is the same as main SKILL.md Stage 2, substituting the appropriate role prompt per phase tag. Use `name="implementer-phase-N"` and `name="reviewer-phase-N"` as labels regardless of which role prompt was loaded — the tag picks the prompt, not the label. **Capture the `agentId`** returned by each spawn and route every subsequent `SendMessage(to=...)` to that captured id, not to the name string.
 
 Loop until `PHASE_APPROVED` or max iterations per phase.
 
@@ -197,7 +197,7 @@ After all phases are `PHASE_APPROVED`, run a single verification agent that veri
 ### 3a: Spawn Verification Agent
 
 - **Read** `reviewer.md` for the role prompt
-- Spawn **one Agent** with `name="verification-reviewer"`:
+- Spawn **one Agent** with `name="verification-reviewer"` (label only) and **capture the returned `agentId`** in case a re-entry SendMessage is needed:
 
 ```xml
 <role_prompt>

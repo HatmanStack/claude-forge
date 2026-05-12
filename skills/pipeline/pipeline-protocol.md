@@ -37,42 +37,46 @@ Shared contract defining stage sequencing, signals, and communication channels f
 | AUDIT_COMPLETE          | Health Auditor  | Intake orchestrator                      | Health audit finished (intake only)                           |
 | DOC_AUDIT_COMPLETE      | Doc Auditor     | Intake orchestrator                      | Doc audit finished (intake only)                              |
 
-## Agent Naming Convention
+## Agent Addressing Convention
 
-Every `Agent` spawn in the pipeline **must** pass an explicit `name` parameter. Subsequent `SendMessage` calls use that same name as the `to` field. Do **not** use role descriptions, free-form labels, or agent IDs — names are deterministic and orchestrator-chosen, so no lookup or ID capture is needed.
+`Agent` spawns in the pipeline pass an explicit `name` parameter **for human-readable labeling only** (tracing spans, transcripts, logs). The `name` is **not** the addressing handle — once an Agent call returns, the spawned subagent is only reachable via the `agentId` (a 16-char hex string) returned in the Agent tool's result metadata. Subsequent `SendMessage` calls **must** use that captured `agentId` as the `to` field. Addressing by `name` may collide, silently re-spawn, or fail outright once the original Agent call has returned.
 
-| Slot | `name` |
-|------|--------|
-| Planner | `planner` |
-| Plan Reviewer | `plan-reviewer` |
-| Implementer (phase N, any tag) | `implementer-phase-N` |
-| Reviewer (phase N, any tag) | `reviewer-phase-N` |
-| Final Reviewer | `final-reviewer` |
-| Verification Reviewer | `verification-reviewer` |
+**Orchestrator responsibility:** every time you spawn an Agent that you may need to continue later (planner, plan reviewer, implementer, reviewer, verification reviewer), record the returned `agentId` in your scratch state so it's available for the next `SendMessage`. Keep the canonical labels below for the `name=` field so traces and feedback.md references stay readable.
 
-The phase tag (`[HYGIENIST]`, `[FORTIFIER]`, `[IMPLEMENTER]`, `[DOC-ENGINEER]`) determines which role prompt is loaded at spawn — it does **not** change the addressable name. Phase 3 tagged `[HYGIENIST]` is still `implementer-phase-3` / `reviewer-phase-3`.
+| Slot | `name` (label only) | Addressed by |
+|------|--------------------|--------------|
+| Planner | `planner` | captured `agentId` |
+| Plan Reviewer | `plan-reviewer` | captured `agentId` |
+| Implementer (phase N, any tag) | `implementer-phase-N` | captured `agentId` |
+| Reviewer (phase N, any tag) | `reviewer-phase-N` | captured `agentId` |
+| Final Reviewer | `final-reviewer` | captured `agentId` |
+| Verification Reviewer | `verification-reviewer` | captured `agentId` |
+
+The phase tag (`[HYGIENIST]`, `[FORTIFIER]`, `[IMPLEMENTER]`, `[DOC-ENGINEER]`) determines which role prompt is loaded at spawn — it does **not** change the label. Phase 3 tagged `[HYGIENIST]` is still labeled `implementer-phase-3` / `reviewer-phase-3`.
 
 ### Worked Example
 
 ```text
-# Spawn planner
-Agent(name="planner", prompt="<role_prompt>...</role_prompt><task>...</task>")
+# Spawn planner — capture the agentId from the result metadata
+result = Agent(name="planner", prompt="<role_prompt>...</role_prompt><task>...</task>")
+planner_id = result.agentId        # e.g. "a1b2c3d4e5f6a7b8" — record this
 → planner finishes with PLAN_COMPLETE
 
-# Spawn plan reviewer
-Agent(name="plan-reviewer", prompt="...")
+# Spawn plan reviewer — capture its agentId too
+result = Agent(name="plan-reviewer", prompt="...")
+plan_reviewer_id = result.agentId
 → reviewer finishes with REVISION_REQUIRED
 
-# Revise — SAME planner, addressed by name
-SendMessage(to="planner", message="Read feedback.md OPEN PLAN_REVIEW items...")
+# Revise — SAME planner, addressed by the captured agentId
+SendMessage(to=planner_id, message="Read feedback.md OPEN PLAN_REVIEW items...")
 → planner finishes with PLAN_COMPLETE
 
-# Re-review — SAME plan-reviewer
-SendMessage(to="plan-reviewer", message="Re-review the revised plan...")
+# Re-review — SAME plan-reviewer, by its captured agentId
+SendMessage(to=plan_reviewer_id, message="Re-review the revised plan...")
 → reviewer finishes with PLAN_APPROVED
 ```
 
-**Never** `SendMessage(to="role-description-string")` or construct names on the fly — always use the fixed table above.
+**Never** `SendMessage(to="planner")` or `SendMessage(to="<any name string>")` — the name is a label, not a routable address. Always use the captured `agentId` from the spawn result. If you lost the id (new session, missing scratch state), spawn a fresh agent with the same `name` label rather than guessing.
 
 ## Communication Channel: feedback.md
 
