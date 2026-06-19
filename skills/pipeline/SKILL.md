@@ -258,7 +258,7 @@ Remaining phases: [list]
 
 After all phases are approved:
 
-- Spawn an **Agent** with `subagent_type="forge:final-reviewer"`, `name="final-reviewer"` (label only):
+- Spawn an **Agent** with `subagent_type="forge:final-reviewer"`, `name="final-reviewer"` (label only). Capturing the returned `agentId` is optional here — unlike the other stages, the Final Reviewer runs once and is never resumed via `SendMessage` (a NO-GO surfaces to the user rather than re-entering a loop):
 
 ```xml
 <task>
