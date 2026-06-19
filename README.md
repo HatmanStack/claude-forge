@@ -30,9 +30,13 @@ When installed as a plugin, skills are prefixed with `forge:` — e.g. `/forge:p
 **Standalone** (copy into any project):
 ```bash
 cp -r skills/ /path/to/your-project/.claude/skills/
+cp -r agents/ /path/to/your-project/.claude/agents/
 # Or personal (all projects)
 cp -r skills/ ~/.claude/skills/
+cp -r agents/ ~/.claude/agents/
 ```
+
+Copy **both** `skills/` and `agents/` — the pipeline roles are native Claude Code subagents that live in `agents/`. When installed standalone, the orchestrator addresses them without the `forge:` plugin prefix (e.g. `planner` instead of `forge:planner`).
 
 Requires [Claude Code](https://docs.anthropic.com/en/docs/claude-code) v1.0.33+ and a git-initialized project.
 
@@ -123,6 +127,22 @@ claude-forge/
 │   └── install-tracing.sh          # Optional Jaeger/OpenTelemetry setup
 ├── hooks/
 │   └── trace_subagents.py          # Tracing hook (installed via bin/install-tracing.sh)
+├── agents/                         # Native subagents (the "team") — auto-discovered as forge:<name>
+│   ├── planner.md                  # Generator — shared across all flows
+│   ├── plan-reviewer.md            # Discriminator — shared across all flows
+│   ├── implementer.md              # Generator — feature + repo-eval flows
+│   ├── reviewer.md                 # Discriminator — feature + repo-eval + verification
+│   ├── final-reviewer.md           # Discriminator — feature flow only
+│   ├── eval-hire.md                # The Pragmatist (read-only)
+│   ├── eval-stress.md              # The Oncall Engineer (read-only)
+│   ├── eval-day2.md                # The Team Lead (read-only)
+│   ├── health-auditor.md           # Pure assessment, no fix guidance (read-only)
+│   ├── health-hygienist.md         # Generator — subtractive (delete, simplify)
+│   ├── health-fortifier.md         # Generator — additive (lint, CI, hooks)
+│   ├── health-reviewer.md          # Discriminator — reviews hygienist + fortifier
+│   ├── doc-auditor.md              # 6-phase drift detection (read-only)
+│   ├── doc-engineer.md             # Generator — fix docs + add prevention
+│   └── doc-reviewer.md             # Discriminator — reviews doc changes
 ├── skills/
 │   ├── audit/SKILL.md              # Combined audit runner
 │   ├── brainstorm/SKILL.md
@@ -131,22 +151,7 @@ claude-forge/
 │   ├── doc-health/SKILL.md
 │   └── pipeline/
 │       ├── SKILL.md                # Orchestrator (routes by intake doc type)
-│       ├── pipeline-protocol.md    # Signal protocol spec
-│       ├── planner.md              # Shared across all flows
-│       ├── plan_reviewer.md        # Shared across all flows
-│       ├── implementer.md          # Feature + repo-eval flows
-│       ├── reviewer.md             # Feature + repo-eval flows
-│       ├── final_reviewer.md       # Feature flow only
-│       ├── eval-hire.md            # The Pragmatist
-│       ├── eval-stress.md          # The Oncall Engineer
-│       ├── eval-day2.md            # The Team Lead
-│       ├── health-auditor.md       # Pure assessment, no fix guidance
-│       ├── health-hygienist.md     # Subtractive (delete, simplify)
-│       ├── health-fortifier.md     # Additive (lint, CI, hooks)
-│       ├── health-reviewer.md      # Reviews both hygienist + fortifier
-│       ├── doc-auditor.md          # 6-phase drift detection
-│       ├── doc-engineer.md         # Fix docs + add prevention
-│       ├── doc-reviewer.md         # Reviews doc changes
+│       ├── pipeline-protocol.md    # Signal protocol + subagent-type spec
 │       └── flows/
 │           ├── audit-flow.md       # Unified plan across multiple audit types
 │           ├── repo-eval-flow.md
@@ -157,6 +162,8 @@ claude-forge/
 ├── CHANGELOG.md
 └── LICENSE
 ```
+
+Each role is a **native Claude Code subagent**: its prompt is the file body and its tool/model access is declared in YAML frontmatter. Generators get write access (`Read, Write, Edit, Glob, Grep, Bash`); reviewers are restricted to `feedback.md` edits (`Read, Glob, Grep, Bash, Edit`); evaluators and auditors are strictly read-only (`Read, Glob, Grep, Bash`). The orchestrator skills spawn each role by `subagent_type` (e.g. `forge:planner`) and continue iteration loops with `SendMessage` — no role-prompt text is injected.
 
 ## Tracing (optional)
 

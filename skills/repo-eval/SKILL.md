@@ -89,20 +89,13 @@ Create the directory.
 
 ### Step 3: Run 3 Evaluators (Parallel)
 
-**You** (the orchestrator) must read the role prompt files and embed their contents in each agent's prompt. Agents cannot access skill directory files.
-
-1. **Read** `skills/pipeline/eval-hire.md` — store contents as `HIRE_PROMPT`
-2. **Read** `skills/pipeline/eval-stress.md` — store contents as `STRESS_PROMPT`
-3. **Read** `skills/pipeline/eval-day2.md` — store contents as `DAY2_PROMPT`
-
-Then spawn **3 Agents in parallel**:
+Spawn **3 Agents in parallel**, each by its `subagent_type`. The subagent definition supplies the role prompt — pass only the `<task>`.
 
 #### Evaluator 1: The Pragmatist
-```xml
-<role_prompt>
-[Contents of eval-hire.md]
-</role_prompt>
 
+Spawn an **Agent** with `subagent_type="forge:eval-hire"`, `name="eval-hire"`:
+
+```text
 <task>
 Evaluate the codebase in the current working directory.
 Role level: [from Step 1]
@@ -112,11 +105,10 @@ Exclusions: [from Step 1]
 ```
 
 #### Evaluator 2: The Oncall Engineer
-```xml
-<role_prompt>
-[Contents of eval-stress.md]
-</role_prompt>
 
+Spawn an **Agent** with `subagent_type="forge:eval-stress"`, `name="eval-stress"`:
+
+```text
 <task>
 Evaluate the codebase in the current working directory.
 Role level: [from Step 1]
@@ -126,11 +118,10 @@ Exclusions: [from Step 1]
 ```
 
 #### Evaluator 3: The Team Lead
-```xml
-<role_prompt>
-[Contents of eval-day2.md]
-</role_prompt>
 
+Spawn an **Agent** with `subagent_type="forge:eval-day2"`, `name="eval-day2"`:
+
+```text
 <task>
 Evaluate the codebase in the current working directory.
 Role level: [from Step 1]

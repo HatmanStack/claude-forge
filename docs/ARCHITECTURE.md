@@ -16,6 +16,20 @@ Claude Forge borrows that generator-discriminator structure for code:
 
 The key insight: **each agent runs in its own context window**. The Plan Reviewer has never seen the Planner's reasoning process — only the output. The Code Reviewer has never seen the Implementer's struggles — only the code. Fresh context means fresh eyes.
 
+## Native Subagents
+
+Every role is a **native Claude Code subagent**, defined as a Markdown file in the plugin's `agents/` directory (auto-discovered and scoped as `forge:<name>`). The file body is the role's system prompt; its YAML frontmatter declares the tools and model it may use. The orchestrator spawns a role by its `subagent_type` and passes only the per-invocation task — it never reads a role file or injects a `<role_prompt>` block. This is what makes the team a *pure* Claude Code team rather than ad-hoc prompts handed to a generic agent.
+
+Tool access is gated per role in frontmatter, which turns the pipeline's safety conventions into structural guarantees:
+
+| Role class | Tools | Why |
+|------------|-------|-----|
+| Generators (Planner, Implementer, Hygienist, Fortifier, Doc Engineer) | `Read, Write, Edit, Glob, Grep, Bash` | They produce and modify code and plans |
+| Discriminators (Plan/Code/Final/Health/Doc Reviewers) | `Read, Glob, Grep, Bash, Edit` | Read-only over source; `Edit` is for `feedback.md` only |
+| Assessors (Eval lenses, Health/Doc Auditors) | `Read, Glob, Grep, Bash` | Strictly read-only — the orchestrator writes the intake docs |
+
+No role is granted the `Agent` tool, which enforces the no-nesting constraint. Team coordination tools (`SendMessage` and task tools) are always available to a spawned teammate regardless of its `tools` list, so a read-only reviewer can still be messaged for the next iteration and still reply with its signal.
+
 ## Signal Protocol
 
 Agents communicate through structured signals routed by the orchestrator:
@@ -208,21 +222,21 @@ This log survives OS wipes (it lives in the repo, not a local config directory) 
 
 - Max 3 iterations per adversarial loop before escalating to the user
 - NO-GO stops the pipeline — no automatic retry
-- Reviewers cannot modify source code — only feedback.md
+- Reviewers cannot modify source code — only feedback.md (enforced by each reviewer subagent's frontmatter `tools`)
 - Plan documents are immutable once created (only Planner revises)
 - Implementer stops and asks rather than guessing
-- Role file validation before any agent is spawned
-- Write ownership enforced (orchestrator writes eval/audit docs, never agents)
+- Roles are native subagents spawned by `subagent_type`; if a needed type is unavailable the orchestrator stops and reports rather than improvising a prompt
+- Write ownership enforced (orchestrator writes eval/audit docs; assessor subagents are read-only and cannot write them)
 
 ## Prerequisites
 
-Claude Forge's orchestrator uses the `Agent` tool to spawn sub-agents and `SendMessage` to continue conversations with existing agents across review iterations. These tools are gated behind an experimental feature flag:
+Claude Forge's orchestrator uses the `Agent` tool to spawn the native subagents in `agents/` (by `subagent_type`) and `SendMessage` to continue conversations with existing agents across review iterations. These tools are gated behind an experimental feature flag:
 
 ```bash
 export CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1
 ```
 
-This must be set in the environment before launching Claude Code. Without it, agent spawning and message routing will fail, breaking all pipeline flows.
+This must be set in the environment before launching Claude Code. Without it, agent spawning and message routing will fail, breaking all pipeline flows. The subagent *definitions* are always available (they are auto-discovered from `agents/`), but spawning them as a team and iterating via `SendMessage` requires the flag.
 
 ## Trade-offs
 

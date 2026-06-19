@@ -32,10 +32,10 @@ Multiple docs exist at `docs/plans/$ARGUMENTS/`:
 
 | Phase Tag | Implementer Role | Reviewer Role | Work Type |
 |-----------|-----------------|---------------|-----------|
-| `[HYGIENIST]` | `health-hygienist.md` | `health-reviewer.md` | Subtractive: delete dead code, remove unused deps, simplify |
-| `[FORTIFIER]` | `health-fortifier.md` | `health-reviewer.md` | Additive: lint configs, CI, hooks, type strictness |
-| `[IMPLEMENTER]` | `implementer.md` | `reviewer.md` | Code fixes: architecture, error handling, performance, testing |
-| `[DOC-ENGINEER]` | `doc-engineer.md` | `doc-reviewer.md` | Doc fixes: delete stale, fix drift, add prevention |
+| `[HYGIENIST]` | `forge:health-hygienist` | `forge:health-reviewer` | Subtractive: delete dead code, remove unused deps, simplify |
+| `[FORTIFIER]` | `forge:health-fortifier` | `forge:health-reviewer` | Additive: lint configs, CI, hooks, type strictness |
+| `[IMPLEMENTER]` | `forge:implementer` | `forge:reviewer` | Code fixes: architecture, error handling, performance, testing |
+| `[DOC-ENGINEER]` | `forge:doc-engineer` | `forge:doc-reviewer` | Doc fixes: delete stale, fix drift, add prevention |
 
 ## State Recovery (Resume Detection)
 
@@ -56,20 +56,9 @@ If `docs/plans/$ARGUMENTS/feedback.md` does not exist, create it with the empty 
 
 Report detected state to the user before continuing.
 
-## Pre-Flight: Role File Validation
+## Pre-Flight: Agent Availability
 
-Before spawning any agents, verify all required role prompt files exist using **Glob**:
-- `skills/pipeline/planner.md`
-- `skills/pipeline/plan_reviewer.md`
-
-Also validate the implementer/reviewer roles needed for each phase tag type. Based on which intake docs are present:
-- If `health-audit.md`: `skills/pipeline/health-hygienist.md`, `skills/pipeline/health-fortifier.md`, `skills/pipeline/health-reviewer.md`
-- If `eval.md`: `skills/pipeline/implementer.md`, `skills/pipeline/reviewer.md`
-- If `doc-audit.md`: `skills/pipeline/doc-engineer.md`, `skills/pipeline/doc-reviewer.md`
-
-Note: evaluator/auditor role files (eval-hire.md, eval-stress.md, eval-day2.md, health-auditor.md, doc-auditor.md) are NOT needed here — they were used during intake only.
-
-If any file is missing, **stop and report** which files are absent.
+All roles are native subagents discovered from the plugin's `agents/` directory (or `.claude/agents/` for a standalone install), so no role-file reading is required. If a needed `subagent_type` is unavailable, **stop and report** it.
 
 ## Critical Rule: No Evaluator/Auditor Agents During Planning or Implementation
 
@@ -88,16 +77,11 @@ The planner reads ALL intake docs and creates ONE unified plan.
 
 ### 1a: Spawn Planner
 
-**Agent addressing:** All spawns follow the convention in `pipeline-protocol.md` — pass an explicit `name` at spawn as a human-readable label, then **capture the returned `agentId`** and use that captured id in every subsequent `SendMessage(to=...)`. The `name` is not a routable address once the Agent call returns. Phase tags (`[HYGIENIST]`, `[FORTIFIER]`, etc.) select the role prompt but do not change the label: phase N is always labeled `implementer-phase-N` / `reviewer-phase-N`.
+**Agent addressing:** All spawns follow the convention in `pipeline-protocol.md` — pass an explicit `name` at spawn as a human-readable label, then **capture the returned `agentId`** and use that captured id in every subsequent `SendMessage(to=...)`. The `name` is not a routable address once the Agent call returns. Phase tags (`[HYGIENIST]`, `[FORTIFIER]`, etc.) select the `subagent_type` but do not change the label: phase N is always labeled `implementer-phase-N` / `reviewer-phase-N`.
 
-- **Read** `planner.md` for the role prompt
-- Spawn an **Agent** with `name="planner"` (label only) and **capture the returned `agentId`** for subsequent SendMessage calls:
+- Spawn an **Agent** with `subagent_type="forge:planner"`, `name="planner"` (label only), and **capture the returned `agentId`** for subsequent SendMessage calls:
 
-```xml
-<role_prompt>
-[Contents of planner.md]
-</role_prompt>
-
+```text
 <task>
 Version: $ARGUMENTS
 
@@ -128,13 +112,9 @@ When complete, end with: PLAN_COMPLETE
 
 ### 1a (Re-entry): Spawn Planner After Re-Evaluation
 
-When looping back from Stage 3 (Verification) with unverified items, reuse the existing planner via `SendMessage(to=<captured planner agentId>, ...)` rather than spawning a new agent. If you no longer have the captured `agentId` (new session, missing scratch state), spawn a fresh planner with `name="planner"` (label) and capture its new `agentId`:
+When looping back from Stage 3 (Verification) with unverified items, reuse the existing planner via `SendMessage(to=<captured planner agentId>, ...)` rather than spawning a new agent. If you no longer have the captured `agentId` (new session, missing scratch state), spawn a fresh planner with `subagent_type="forge:planner"`, `name="planner"` (label), and capture its new `agentId`:
 
-```xml
-<role_prompt>
-[Contents of planner.md]
-</role_prompt>
-
+```text
 <task>
 Version: $ARGUMENTS
 
@@ -165,22 +145,22 @@ Identify all phases by Glob for `docs/plans/$ARGUMENTS/Phase-*.md` (excluding Ph
 For each phase, read the phase title to determine the tag, then spawn the correct implementer and reviewer:
 
 **[HYGIENIST] phases:**
-- Implementer: **Read** `health-hygienist.md`, spawn with hygienist role prompt
-- Reviewer: **Read** `health-reviewer.md`, spawn with health reviewer role prompt
+- Implementer: spawn subagent_type=forge:health-hygienist
+- Reviewer: spawn subagent_type=forge:health-reviewer
 
 **[FORTIFIER] phases:**
-- Implementer: **Read** `health-fortifier.md`, spawn with fortifier role prompt
-- Reviewer: **Read** `health-reviewer.md`, spawn with health reviewer role prompt
+- Implementer: spawn subagent_type=forge:health-fortifier
+- Reviewer: spawn subagent_type=forge:health-reviewer
 
 **[IMPLEMENTER] phases:**
-- Implementer: **Read** `implementer.md`, spawn with standard implementer role prompt
-- Reviewer: **Read** `reviewer.md`, spawn with standard code reviewer role prompt
+- Implementer: spawn subagent_type=forge:implementer
+- Reviewer: spawn subagent_type=forge:reviewer
 
 **[DOC-ENGINEER] phases:**
-- Implementer: **Read** `doc-engineer.md`, spawn with doc engineer role prompt
-- Reviewer: **Read** `doc-reviewer.md`, spawn with doc reviewer role prompt
+- Implementer: spawn subagent_type=forge:doc-engineer
+- Reviewer: spawn subagent_type=forge:doc-reviewer
 
-Agent spawn format is the same as main SKILL.md Stage 2, substituting the appropriate role prompt per phase tag. Use `name="implementer-phase-N"` and `name="reviewer-phase-N"` as labels regardless of which role prompt was loaded — the tag picks the prompt, not the label. **Capture the `agentId`** returned by each spawn and route every subsequent `SendMessage(to=...)` to that captured id, not to the name string.
+Agent spawn format is the same as main SKILL.md Stage 2, substituting the appropriate `subagent_type` per phase tag. Use `name="implementer-phase-N"` and `name="reviewer-phase-N"` as labels regardless of which `subagent_type` was spawned — the tag picks the `subagent_type`, not the label. **Capture the `agentId`** returned by each spawn and route every subsequent `SendMessage(to=...)` to that captured id, not to the name string.
 
 Loop until `PHASE_APPROVED` or max iterations per phase.
 
@@ -196,14 +176,9 @@ After all phases are `PHASE_APPROVED`, run a single verification agent that veri
 
 ### 3a: Spawn Verification Agent
 
-- **Read** `reviewer.md` for the role prompt
-- Spawn **one Agent** with `name="verification-reviewer"` (label only) and **capture the returned `agentId`** in case a re-entry SendMessage is needed:
+- Spawn **one Agent** with `subagent_type="forge:reviewer"`, `name="verification-reviewer"` (label only), and **capture the returned `agentId`** in case a re-entry SendMessage is needed:
 
-```xml
-<role_prompt>
-[Contents of reviewer.md]
-</role_prompt>
-
+```text
 <task>
 Version: $ARGUMENTS
 

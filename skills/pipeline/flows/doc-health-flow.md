@@ -44,16 +44,9 @@ If `docs/plans/$ARGUMENTS/feedback.md` does not exist, create it with the empty 
 
 Report detected state to the user before continuing.
 
-## Pre-Flight: Role File Validation
+## Pre-Flight: Agent Availability
 
-Before spawning any agents, verify all required role prompt files exist using **Glob**:
-- `skills/pipeline/planner.md`
-- `skills/pipeline/plan_reviewer.md`
-- `skills/pipeline/doc-engineer.md`
-- `skills/pipeline/doc-reviewer.md`
-- `skills/pipeline/doc-auditor.md`
-
-If any file is missing, **stop and report** which files are absent.
+All roles are native subagents discovered from the plugin's `agents/` directory (or `.claude/agents/` for a standalone install), so no role-file reading is required. If a needed `subagent_type` is unavailable, **stop and report** it.
 
 ## Stage 1: Initial Audit (already done by intake)
 
@@ -80,14 +73,9 @@ The planner reads `doc-audit.md` instead of `brainstorm.md`. The planner creates
 
 **Agent addressing:** All spawns follow the convention in `pipeline-protocol.md` — pass an explicit `name` at spawn as a human-readable label only, then **capture the returned `agentId`** and route every subsequent `SendMessage(to=...)` to that captured id. The `name` string is not a routable address once the Agent call returns.
 
-- **Read** `planner.md` for the role prompt
-- Spawn an **Agent** with `name="planner"` (label only) and **capture the returned `agentId`** for subsequent SendMessage calls:
+- Spawn an **Agent** with `subagent_type="forge:planner"`, `name="planner"` (label only), and **capture the returned `agentId`** for subsequent SendMessage calls:
 
-```xml
-<role_prompt>
-[Contents of planner.md]
-</role_prompt>
-
+```text
 <task>
 Version: $ARGUMENTS
 Input document: docs/plans/$ARGUMENTS/doc-audit.md (this replaces brainstorm.md)
@@ -119,10 +107,7 @@ Loop until `PLAN_APPROVED` or max iterations.
 
 **Max iterations per phase: 3.**
 
-- **Read** `doc-engineer.md` for the implementer role prompt
-- **Read** `doc-reviewer.md` for the reviewer role prompt
-
-Process phases sequentially. Agent spawn format matches main SKILL.md Stage 2, substituting the doc-engineer and doc-reviewer role prompts. Use `name="implementer-phase-N"` and `name="reviewer-phase-N"` as labels, and **capture each spawn's returned `agentId`** for use in subsequent `SendMessage(to=...)` calls — never address a continuation by the name string.
+Process phases sequentially. Agent spawn format matches main SKILL.md Stage 2, using subagent_type=forge:doc-engineer for the implementer and subagent_type=forge:doc-reviewer for the reviewer. Use `name="implementer-phase-N"` and `name="reviewer-phase-N"` as labels, and **capture each spawn's returned `agentId`** for use in subsequent `SendMessage(to=...)` calls — never address a continuation by the name string.
 
 Report between phases:
 ```text
@@ -136,14 +121,9 @@ After all phases are `PHASE_APPROVED`, run a single verification agent that veri
 
 ### 4a: Spawn Verification Agent
 
-- **Read** `reviewer.md` for the role prompt
-- Spawn **one Agent** with `name="verification-reviewer"` (label only) and **capture the returned `agentId`** in case a re-entry SendMessage is needed:
+- Spawn **one Agent** with `subagent_type="forge:reviewer"`, `name="verification-reviewer"` (label only), and **capture the returned `agentId`** in case a re-entry SendMessage is needed:
 
-```xml
-<role_prompt>
-[Contents of reviewer.md]
-</role_prompt>
-
+```text
 <task>
 Version: $ARGUMENTS
 

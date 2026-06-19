@@ -1,12 +1,12 @@
 ---
 name: pipeline
 description: Run the adversarial plan-implement-review pipeline. Spawns agents for each role with their own context windows. Use after /brainstorm, /repo-eval, /repo-health, or /doc-health has produced a starting doc.
-allowed-tools: Agent, Read, Write, Glob, Grep, Bash, Edit
+allowed-tools: Agent, SendMessage, Read, Write, Glob, Grep, Bash, Edit
 ---
 
 # Pipeline Orchestrator
 
-You coordinate the adversarial development pipeline. Each role runs as a separate agent with a fresh context window. Your job is to spawn agents, read their signals, and route work accordingly.
+You coordinate the adversarial development pipeline. Each role is a **native Claude Code subagent** (defined in the plugin's `agents/` directory) and runs in its own fresh context window. Your job is to spawn each role by its `subagent_type`, read its signals, and route work accordingly. You never read role-prompt files or inject prompt text — the subagent definition supplies the system prompt; you supply only the task.
 
 **Read `pipeline-protocol.md` for the full signal protocol before starting.**
 
@@ -68,18 +68,13 @@ Report the detected state to the user before continuing.
 
 **One Planner agent and one Plan Reviewer agent for the entire planning stage.** Spawn each once, then use `SendMessage` for subsequent iterations.
 
-**Agent addressing:** Every spawn passes an explicit `name` per the convention in `pipeline-protocol.md` — the `name` is a **human-readable label only** (traces, logs, feedback.md references). Capture the `agentId` from each Agent spawn result and store it in scratch state; every `SendMessage(to=...)` must use that captured `agentId`, never the name string. See `pipeline-protocol.md` → *Agent Addressing Convention*.
+**Agent addressing:** Every spawn sets `subagent_type` to the role and passes an explicit `name` as a **human-readable label only** (traces, logs, feedback.md references). Capture the `agentId` from each Agent spawn result and store it in scratch state; every `SendMessage(to=...)` must use that captured `agentId`, never the name string. See `pipeline-protocol.md` → *Agents Are Native Subagents*.
 
 ### 1a: Spawn Planner (once)
 
-- **Read** `planner.md` to load the role prompt
-- Spawn an **Agent** with `name="planner"` (label only) and **capture the returned `agentId`** for subsequent SendMessage calls:
+- Spawn an **Agent** with `subagent_type="forge:planner"`, `name="planner"` (label only), and **capture the returned `agentId`** for subsequent SendMessage calls. Pass only the task:
 
 ```xml
-<role_prompt>
-[Contents of planner.md]
-</role_prompt>
-
 <task>
 Version: $ARGUMENTS
 Brainstorm document: docs/plans/$ARGUMENTS/brainstorm.md
@@ -97,14 +92,9 @@ When complete, end your response with: PLAN_COMPLETE
 
 ### 1b: Spawn Plan Reviewer (once)
 
-- **Read** `plan_reviewer.md` to load the role prompt
-- Spawn an **Agent** with `name="plan-reviewer"` (label only) and **capture the returned `agentId`**:
+- Spawn an **Agent** with `subagent_type="forge:plan-reviewer"`, `name="plan-reviewer"` (label only), and **capture the returned `agentId`**:
 
 ```xml
-<role_prompt>
-[Contents of plan_reviewer.md]
-</role_prompt>
-
 <task>
 Version: $ARGUMENTS
 Plan location: docs/plans/$ARGUMENTS/
@@ -188,14 +178,9 @@ Continuing from Phase N...
 
 #### 2a: Spawn Implementer (once per phase)
 
-- **Read** `implementer.md` to load the role prompt
-- Spawn an **Agent** with `name="implementer-phase-N"` (label only — substitute the actual phase number) and **capture the returned `agentId`** under a key like `implementer_phase_N_id`:
+- Spawn an **Agent** with `subagent_type="forge:implementer"`, `name="implementer-phase-N"` (label only — substitute the actual phase number), and **capture the returned `agentId`** under a key like `implementer_phase_N_id`:
 
 ```xml
-<role_prompt>
-[Contents of implementer.md]
-</role_prompt>
-
 <task>
 Version: $ARGUMENTS
 Phase: N
@@ -214,14 +199,9 @@ When complete, end your response with: IMPLEMENTATION_COMPLETE
 
 #### 2b: Spawn Reviewer (once per phase)
 
-- **Read** `reviewer.md` to load the role prompt
-- Spawn an **Agent** with `name="reviewer-phase-N"` (label only — substitute the actual phase number) and **capture the returned `agentId`** under a key like `reviewer_phase_N_id`:
+- Spawn an **Agent** with `subagent_type="forge:reviewer"`, `name="reviewer-phase-N"` (label only — substitute the actual phase number), and **capture the returned `agentId`** under a key like `reviewer_phase_N_id`:
 
 ```xml
-<role_prompt>
-[Contents of reviewer.md]
-</role_prompt>
-
 <task>
 Version: $ARGUMENTS
 Phase: N
@@ -278,14 +258,9 @@ Remaining phases: [list]
 
 After all phases are approved:
 
-- **Read** `final_reviewer.md` to load the role prompt
-- Spawn an **Agent** with `name="final-reviewer"` (label only):
+- Spawn an **Agent** with `subagent_type="forge:final-reviewer"`, `name="final-reviewer"` (label only). Capturing the returned `agentId` is optional here — unlike the other stages, the Final Reviewer runs once and is never resumed via `SendMessage` (a NO-GO surfaces to the user rather than re-entering a loop):
 
 ```xml
-<role_prompt>
-[Contents of final_reviewer.md]
-</role_prompt>
-
 <task>
 Version: $ARGUMENTS
 Plan location: docs/plans/$ARGUMENTS/
@@ -385,7 +360,7 @@ B) Manually resolve and continue
 ### Agent Spawning
 
 - **ONE agent at a time.** Every stage runs a single foreground agent. Wait for it to complete fully before deciding the next step.
-- **ONE Implementer and ONE Reviewer per phase.** Spawn each once with the canonical `name` label from `pipeline-protocol.md`, **capture the returned `agentId`**, then use `SendMessage(to=<captured agentId>)` for subsequent iterations. Never spawn a new agent for the same role within a phase. Never address by role description or by the `name` string — names are labels, only the captured `agentId` is routable.
+- **ONE Implementer and ONE Reviewer per phase.** Spawn each once with the role's `subagent_type` and canonical `name` label from `pipeline-protocol.md`, **capture the returned `agentId`**, then use `SendMessage(to=<captured agentId>)` for subsequent iterations. Never spawn a new agent for the same role within a phase. Never address by role description or by the `name` string — names are labels, only the captured `agentId` is routable.
 - **NO duplicate or replacement agents.** If an agent is slow, wait. Agents can take 20+ minutes on large codebases. Do NOT spawn a second agent for the same work.
 - **NO per-phase planners.** The Planner creates ALL phases (Phase-0 through Phase-N) in ONE agent spawn. Never decompose planning into separate agents per phase.
 - **NO parallel agents.** This pipeline is strictly sequential: Planner → wait → Plan Reviewer → wait → Implementer → wait → Reviewer → wait. Never overlap stages.
@@ -399,7 +374,7 @@ B) Manually resolve and continue
 - **NEVER** skip the Plan Reviewer — every plan gets reviewed
 - **NEVER** skip the Code Reviewer — every implementation gets reviewed
 - **NEVER** continue past a NO-GO without user input
-- **DO** read each role prompt file fresh before spawning — don't cache from memory
+- **DO** spawn each role by its `subagent_type` (e.g. `forge:planner`) — the subagent definition supplies the system prompt; never read role files or inject `<role_prompt>` blocks
 - **DO** report progress between stages so the user knows what's happening
-- **DO** include the full role prompt contents in each agent's prompt (the agent has no access to the skill directory files)
+- **DO** pass only the `<task>` in each agent's prompt — the role's behavior comes from its subagent definition
 - **DO** respect the max iteration limits — surface persistent issues to the user rather than looping forever
