@@ -85,16 +85,9 @@ Create the directory.
 
 ### Step 3: Run Auditor
 
-**You** (the orchestrator) must read the role prompt file and embed its contents in the agent's prompt. Agents cannot access skill directory files.
+Spawn an **Agent** with `subagent_type="forge:health-auditor"`, `name="health-auditor"`. The subagent definition supplies the role prompt — pass only the `<task>`:
 
-1. **Read** `skills/pipeline/health-auditor.md` — store contents as `AUDITOR_PROMPT`
-2. Spawn an **Agent** with:
-
-```xml
-<role_prompt>
-[Contents of health-auditor.md]
-</role_prompt>
-
+```text
 <task>
 Audit the codebase in the current working directory.
 Goal: [from Step 1]

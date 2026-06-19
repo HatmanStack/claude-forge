@@ -5,6 +5,21 @@ All notable changes to Claude Forge will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0] - 2026-06-19
+
+### Changed
+
+- **Pure native-subagent team** — Every pipeline role is now a first-class Claude Code subagent under `agents/` (auto-discovered as `forge:<name>`), replacing the previous hybrid approach where the orchestrator read role-prompt files from `skills/pipeline/` and injected them as `<role_prompt>` blocks into a generic agent. The orchestrator now spawns each role by `subagent_type` (e.g. `forge:planner`) and passes only the per-invocation task; the `SendMessage` iteration loops are unchanged. The 15 role files moved from `skills/pipeline/*.md` into `agents/*.md` and gained YAML frontmatter (`name`, `description`, `tools`); `plan_reviewer.md`/`final_reviewer.md` were renamed to `plan-reviewer.md`/`final-reviewer.md` to satisfy the subagent name convention
+- **Per-role tool lockdown** — Tool access is now enforced in each subagent's frontmatter instead of by convention. Generators (Planner, Implementer, Hygienist, Fortifier, Doc Engineer) get `Read, Write, Edit, Glob, Grep, Bash`; reviewers get `Read, Glob, Grep, Bash, Edit` (Edit is for `feedback.md` only); evaluators and auditors are strictly read-only (`Read, Glob, Grep, Bash`). No role is granted the `Agent` tool, structurally enforcing the no-nesting constraint
+- **`pipeline-protocol.md`** — the *Agent Addressing Convention* section is now *Agents Are Native Subagents*, with a role→`subagent_type` table and a note on standalone (unprefixed) addressing
+- **Stale `pipeline.md` references fixed** — role bodies that pointed at a non-existent `pipeline.md` now reference `pipeline-protocol.md`
+
+### Migration
+
+- **Plugin installs:** no action — `agents/` is auto-discovered on the next `/reload-plugins` or session start
+- **Standalone installs:** copy the new `agents/` directory alongside `skills/` (`cp -r agents/ /path/to/project/.claude/agents/`). When installed standalone, roles are addressed without the `forge:` prefix
+- `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` is still required (the team is spawned via `Agent` + `SendMessage`)
+
 ## [1.7.0] - 2026-05-01
 
 ### Added

@@ -45,18 +45,9 @@ If `docs/plans/$ARGUMENTS/feedback.md` does not exist, create it with the empty 
 
 Report detected state to the user before continuing.
 
-## Pre-Flight: Role File Validation
+## Pre-Flight: Agent Availability
 
-Before spawning any agents, verify all required role prompt files exist using **Glob**:
-- `skills/pipeline/planner.md`
-- `skills/pipeline/plan_reviewer.md`
-- `skills/pipeline/implementer.md`
-- `skills/pipeline/reviewer.md`
-- `skills/pipeline/eval-hire.md`
-- `skills/pipeline/eval-stress.md`
-- `skills/pipeline/eval-day2.md`
-
-If any file is missing, **stop and report** which files are absent. Do not attempt to spawn agents with missing role prompts.
+All roles are native subagents discovered from the plugin's `agents/` directory (or `.claude/agents/` for a standalone install), so no role-file reading is required. If a needed `subagent_type` is unavailable, **stop and report** it.
 
 ## Stage 1: Calibration
 
@@ -114,14 +105,9 @@ The planner reads `eval.md` instead of `brainstorm.md`. The planner creates ONE 
 
 **Agent addressing:** All spawns follow the convention in `pipeline-protocol.md` — pass an explicit `name` at spawn as a human-readable label only, then **capture the returned `agentId`** and route every subsequent `SendMessage(to=...)` to that captured id. The `name` string is not a routable address once the Agent call returns.
 
-- **Read** `planner.md` for the role prompt
-- Spawn an **Agent** with `name="planner"` (label only) and **capture the returned `agentId`** for subsequent SendMessage calls:
+- Spawn an **Agent** with `subagent_type="forge:planner"`, `name="planner"` (label only), and **capture the returned `agentId`** for subsequent SendMessage calls:
 
-```xml
-<role_prompt>
-[Contents of planner.md]
-</role_prompt>
-
+```text
 <task>
 Version: $ARGUMENTS
 Input document: docs/plans/$ARGUMENTS/eval.md (this replaces brainstorm.md)
@@ -154,7 +140,7 @@ Loop until `PLAN_APPROVED` or max iterations.
 
 **Max iterations per phase: 3.**
 
-Standard implementation process — see main SKILL.md Stage 2 (including State Recovery for per-phase resume detection). The implementer executes the remediation plan using the existing `implementer.md` role prompt.
+Standard implementation process — see main SKILL.md Stage 2 (including State Recovery for per-phase resume detection). The implementer executes the remediation plan using subagent_type=forge:implementer.
 
 ## Stage 4: Verification
 
@@ -162,14 +148,9 @@ After all phases are `PHASE_APPROVED`, run a single verification agent that veri
 
 ### 4a: Spawn Verification Agent
 
-- **Read** `reviewer.md` for the role prompt
-- Spawn **one Agent** with `name="verification-reviewer"` (label only) and **capture the returned `agentId`** in case a re-entry SendMessage is needed:
+- Spawn **one Agent** with `subagent_type="forge:reviewer"`, `name="verification-reviewer"` (label only), and **capture the returned `agentId`** in case a re-entry SendMessage is needed:
 
-```xml
-<role_prompt>
-[Contents of reviewer.md]
-</role_prompt>
-
+```text
 <task>
 Version: $ARGUMENTS
 

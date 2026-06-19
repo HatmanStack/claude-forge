@@ -195,13 +195,9 @@ After all questions are answered, generate the directory name: `YYYY-MM-DD-audit
 
 Create the directory.
 
-### Step 4: Read Role Prompts
+### Step 4: Roles Are Native Subagents
 
-Before spawning agents, read all required role prompt files. Only read prompts for selected audits.
-
-- **If health selected:** Read `skills/pipeline/health-auditor.md`
-- **If eval selected:** Read `skills/pipeline/eval-hire.md`, `skills/pipeline/eval-stress.md`, `skills/pipeline/eval-day2.md`
-- **If docs selected:** Read `skills/pipeline/doc-auditor.md`
+Each evaluator and auditor is a native plugin subagent (under `agents/`) spawned by its `subagent_type`. There are no role prompt files to read — the subagent definition supplies the prompt, and you pass only the `<task>`.
 
 ### Step 5: Spawn All Agents in Parallel
 
@@ -225,11 +221,9 @@ All auditor/evaluator agents are read-only — they explore the codebase but don
 
 **Agent 1: Health Auditor** (if health selected)
 
-```xml
-<role_prompt>
-[Contents of health-auditor.md]
-</role_prompt>
+Spawn an **Agent** with `subagent_type="forge:health-auditor"`, `name="health-auditor"`:
 
+```text
 <task>
 Audit the codebase in the current working directory.
 Goal: [from Step 2]
@@ -241,11 +235,9 @@ Constraints: [from Step 2]
 
 **Agent 2: Eval — The Pragmatist** (if eval selected)
 
-```xml
-<role_prompt>
-[Contents of eval-hire.md]
-</role_prompt>
+Spawn an **Agent** with `subagent_type="forge:eval-hire"`, `name="eval-hire"`:
 
+```text
 <task>
 Evaluate the codebase in the current working directory.
 Role level: [from Step 2]
@@ -256,11 +248,9 @@ Exclusions: [from Step 2]
 
 **Agent 3: Eval — The Oncall Engineer** (if eval selected)
 
-```xml
-<role_prompt>
-[Contents of eval-stress.md]
-</role_prompt>
+Spawn an **Agent** with `subagent_type="forge:eval-stress"`, `name="eval-stress"`:
 
+```text
 <task>
 Evaluate the codebase in the current working directory.
 Role level: [from Step 2]
@@ -271,11 +261,9 @@ Exclusions: [from Step 2]
 
 **Agent 4: Eval — The Team Lead** (if eval selected)
 
-```xml
-<role_prompt>
-[Contents of eval-day2.md]
-</role_prompt>
+Spawn an **Agent** with `subagent_type="forge:eval-day2"`, `name="eval-day2"`:
 
+```text
 <task>
 Evaluate the codebase in the current working directory.
 Role level: [from Step 2]
@@ -286,11 +274,9 @@ Exclusions: [from Step 2]
 
 **Agent 5: Doc Auditor** (if docs selected)
 
-```xml
-<role_prompt>
-[Contents of doc-auditor.md]
-</role_prompt>
+Spawn an **Agent** with `subagent_type="forge:doc-auditor"`, `name="doc-auditor"`:
 
+```text
 <task>
 Audit documentation in the current working directory against codebase reality.
 Doc scope: [from Step 2]
@@ -357,6 +343,6 @@ The pipeline will create one unified plan across all audit types.
 - **DO NOT** prompt the user again after all questions are answered — run all agents autonomously
 - **DO NOT** start remediation — your only output is the intake docs
 - **DO NOT** re-run evaluator or auditor agents after writing the intake docs — they run exactly once during this skill. Re-evaluation happens later in `/pipeline` after all remediation is complete.
-- **DO** embed role prompt contents in agent prompts (agents cannot access skill directory files)
+- **DO** spawn each evaluator/auditor by its subagent_type (e.g. forge:eval-hire); the subagent definition supplies the prompt
 - **DO** produce all intake docs in the same plan directory
 - **DO** report results after each audit completes
