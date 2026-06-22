@@ -48,27 +48,31 @@ def check_signal_provenance(events):
 def check_pipeline_order(events):
     """Ordering invariants that hold across all Forge pipeline types:
 
-    - PLAN_APPROVED must be preceded by PLAN_COMPLETE
+    - each PLAN_APPROVED must consume a fresh, not-yet-used PLAN_COMPLETE
     - no PHASE_APPROVED before the plan is approved
     - GO/VERIFIED must be preceded by at least one PHASE_APPROVED
     """
     out = []
-    seen = set()
-    plan_approved_at = None
+    pending_plan = 0  # unconsumed PLAN_COMPLETE credits; one per approval
+    plan_approved = False
     phase_approved_seen = False
     for i, ev in enumerate(events):
         sig = ev.get("signal")
-        if sig == "PLAN_APPROVED" and "PLAN_COMPLETE" not in seen:
-            out.append(_violation("plan_approved_without_plan", "PLAN_APPROVED with no prior PLAN_COMPLETE", i))
-        if sig == "PHASE_APPROVED":
-            if plan_approved_at is None:
+        if sig == "PLAN_COMPLETE":
+            pending_plan += 1
+        elif sig == "PLAN_APPROVED":
+            if pending_plan <= 0:
+                out.append(_violation("plan_approved_without_plan", "PLAN_APPROVED with no fresh PLAN_COMPLETE", i))
+            else:
+                pending_plan -= 1
+            plan_approved = True
+        elif sig == "PHASE_APPROVED":
+            if not plan_approved:
                 out.append(_violation("phase_before_plan", "PHASE_APPROVED before PLAN_APPROVED", i))
             phase_approved_seen = True
-        if sig in ("GO", "VERIFIED") and not phase_approved_seen:
-            out.append(_violation("final_without_phase", f"{sig} before any PHASE_APPROVED", i))
-        if sig == "PLAN_APPROVED":
-            plan_approved_at = i
-        seen.add(sig)
+        elif sig in ("GO", "VERIFIED"):
+            if not phase_approved_seen:
+                out.append(_violation("final_without_phase", f"{sig} before any PHASE_APPROVED", i))
     return out
 
 

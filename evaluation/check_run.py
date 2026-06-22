@@ -51,7 +51,7 @@ def main():
     if sec:
         print(f"\nsecurity findings: {len(sec)}")
         for f in sec:
-            print(f"  [{f.get('severity')}] {f.get('dp')}.{f.get('kind')} — {f.get('detail')}")
+            print(f"  [{f.get('severity', '?')}] {f.get('dp', '?')}.{f.get('kind', '?')} — {f.get('detail', '')}")
 
     if violations:
         print(f"\nTRAJECTORY VIOLATIONS: {len(violations)}")

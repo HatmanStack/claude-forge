@@ -159,9 +159,14 @@ _INJECTION_PATTERNS = [
 _inj_extra = os.environ.get("CLAUDE_FORGE_SECURITY_INJECTION_EXTRA", "").strip()
 if _inj_extra:
     _INJECTION_PATTERNS.append(_inj_extra)
+# If the user's custom regex is invalid we drop it and keep the built-ins. `_log`
+# isn't defined yet at module load, so we stash the bad pattern and surface it
+# once from main() instead of failing silently.
+_INJECTION_EXTRA_DROPPED = ""
 try:
     _INJECTION_RE = re.compile("|".join(_INJECTION_PATTERNS), re.IGNORECASE)
 except re.error:
+    _INJECTION_EXTRA_DROPPED = _inj_extra
     _INJECTION_RE = re.compile("|".join(_INJECTION_PATTERNS[:-1]), re.IGNORECASE)
 
 # DP5 — text addressed to the orchestrator/aggregator ("tell the vote-counter
@@ -584,8 +589,10 @@ def _security_analyze(otel, state_dir, saved, content, sub_jsonl, ts_ns):
         neg_found = [s for s, rx in _NEG_SIGNAL_RES.items() if rx.search(output)]
         _record_security_state(state_dir, role, advance_found, neg_found)
 
-        # DP3 — a generator/assessor casting a gate signal it cannot legitimately cast.
-        if advance_found and (role in _GENERATOR_ROLES or role in _ASSESSOR_ROLES):
+        # DP3 — only reviewer roles may cast a gate signal. Anyone else (a
+        # generator, an assessor, or an unclassifiable "unknown" role) doing so
+        # is a forged ballot.
+        if advance_found and role not in _REVIEWER_ROLES:
             _emit_security(
                 otel, carrier, state_dir, "dp3", "signal_forgery", "high", role,
                 f"role={role} emitted gate signal {','.join(advance_found)} it cannot cast",
@@ -1353,6 +1360,11 @@ def main():
         f"called tracing={os.environ.get('CLAUDE_FORGE_TRACING','UNSET')} bytes={len(raw)}",
         raw,
     )
+    if _INJECTION_EXTRA_DROPPED:
+        _log(
+            "dropped invalid CLAUDE_FORGE_SECURITY_INJECTION_EXTRA regex "
+            f"(kept built-in patterns): {_INJECTION_EXTRA_DROPPED!r}"
+        )
 
     if not _env_truthy("CLAUDE_FORGE_TRACING"):
         _exit_ok()

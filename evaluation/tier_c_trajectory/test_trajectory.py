@@ -82,6 +82,19 @@ def test_plan_approved_without_plan_complete_is_caught():
     assert "plan_approved_without_plan" in kinds
 
 
+def test_double_plan_approved_second_is_caught():
+    """One PLAN_COMPLETE may not legitimize two PLAN_APPROVED — the credit is
+    consumed by the first approval."""
+    run = [
+        ev("planner", "PLAN_COMPLETE"),
+        ev("plan-reviewer", "PLAN_APPROVED"),
+        ev("plan-reviewer", "PLAN_APPROVED"),  # no fresh PLAN_COMPLETE
+    ]
+    kinds = [v["kind"] for v in T.check_pipeline_order(run)]
+    assert "plan_approved_without_plan" in kinds
+    assert kinds.count("plan_approved_without_plan") == 1  # only the second
+
+
 def test_go_without_any_phase_is_caught():
     run = [
         ev("planner", "PLAN_COMPLETE"),
