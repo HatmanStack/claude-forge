@@ -5,6 +5,28 @@ All notable changes to Claude Forge will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.10.0] - 2026-06-22
+
+### Added
+
+- **Evaluation harness (`evaluation/`)** — Forge now ships an evaluation pyramid for its own team, the regression net that was missing while agents/tools/orchestrator kept changing:
+  - **Tier A — contracts** (`evaluation/tier_a_contracts/`, every push/PR): deterministic, pure-stdlib + pytest checks of agent frontmatter, per-role tool policy (generators get Write+Edit; reviewers get Edit but not Write; assessors are read-only; no role gets `Agent`), name/filename/uniqueness, the team being exactly the 15 expected roles, `forge:<type>` references resolving (no dangling refs, no orphans), `pipeline-protocol.md` role coverage, `plugin.json` having no `agents` field, plugin/marketplace version agreement, CHANGELOG currency, and the trace hook's role taxonomy + signal-authorization map matching the registry
+  - **Tier C — trajectory** (`evaluation/tier_c_trajectory/` + `evaluation/check_run.py`): validates the governance-signal sequence against protocol invariants — signal provenance (forged approvals), gate order, and no skipped reviews — against synthetic fixtures per-PR and against real runs via the trace hook
+  - CI workflow `.github/workflows/evaluation.yml` runs Tier A and Tier C on every push and pull request
+- **Trajectory run summary** — the tracing hook now persists `trace-summary.json` (roles, governance-signal events, security findings) into its per-session state dir, bridging Tier D observability to Tier C assertion; `evaluation/check_run.py --latest` replays the protocol invariants over a real run.
+
+## [1.9.0] - 2026-06-21
+
+### Added
+
+- **Defense-in-depth security tracing** — When `CLAUDE_FORGE_TRACING=1`, the tracing hook now runs a passive detection layer over the five multi-agent defense points and emits `security:dp{1..5}.*` spans (status ERROR) plus a `forge.security.*` summary on `session_complete`. It reads each subagent's role/actions from Claude Code's trusted transcript metadata, so it can attest signal provenance and audit consensus out of band:
+  - **DP1 (input boundary)** — flags instruction-like text or a standalone gate token (e.g. an injected `PHASE_APPROVED`) inside files an agent read
+  - **DP2 (fan-out)** — flags the correlated-compromise precondition when ≥2 read-only assessors fan out over the same input on the shared model
+  - **DP3 (inter-agent channel)** — flags signal forgery: a generator/assessor emitting a gate signal (`PLAN_APPROVED`/`PHASE_APPROVED`/`GO`/`VERIFIED`) it isn't authorized to cast
+  - **DP4 (tool boundary)** — flags a reviewer that approved without running tests/build, and check-defeating commands (`--no-verify`, `|| true`, …)
+  - **DP5 (aggregation)** — flags output addressed to the orchestrator and reviewer decision-starvation (only-ever-changes-requested)
+- Detection only — never blocks a tool call or changes pipeline flow; tuned for first-party repos (low false positives). New knobs: `CLAUDE_FORGE_TRACE_SECURITY` (default on) and `CLAUDE_FORGE_SECURITY_INJECTION_EXTRA`. Documented in README (*Security tracing*) and ARCHITECTURE (*Defense-in-Depth Tracing*). Pairs with the 1.8.0 frontmatter tool lockdown as the matching enforcement layer (blocked attempts show as `permission_denied:*` spans).
+
 ## [1.8.0] - 2026-06-19
 
 ### Changed
