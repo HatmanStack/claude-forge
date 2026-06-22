@@ -100,6 +100,97 @@ INNER_TOOL_BLOCKLIST = {
     if s.strip()
 }
 
+# ---------------- security analysis (defense-in-depth tracing) ----------------
+# Passive detection layer. The hook reads each subagent's ROLE and ACTIONS from
+# Claude Code's own transcript metadata — which attacker-controlled file/text
+# content cannot forge — so it can attest signal provenance (DP3) and re-derive
+# governance out-of-band (DP5), the two things the in-band channel/aggregator
+# cannot do for themselves. Findings surface as `security:dp{1..5}.*` spans
+# (status ERROR for visibility) plus a per-session summary on session_complete.
+# DETECTION ONLY: it never blocks a tool call and never changes pipeline flow.
+# Tuned for first-party repos (low false positives). On by default when tracing
+# is on; disable with CLAUDE_FORGE_TRACE_SECURITY=0.
+TRACE_SECURITY = os.environ.get("CLAUDE_FORGE_TRACE_SECURITY", "1").strip().lower() not in (
+    "0", "false", "no", "off", ""
+)
+
+# Role taxonomy (subagent_type without the `forge:` plugin-scope prefix).
+_GENERATOR_ROLES = {"planner", "implementer", "health-hygienist", "health-fortifier", "doc-engineer"}
+_REVIEWER_ROLES = {"plan-reviewer", "reviewer", "health-reviewer", "doc-reviewer", "final-reviewer"}
+_ASSESSOR_ROLES = {"eval-hire", "eval-stress", "eval-day2", "health-auditor", "doc-auditor"}
+_ALL_ROLES_BY_LEN = sorted(
+    _GENERATOR_ROLES | _REVIEWER_ROLES | _ASSESSOR_ROLES, key=len, reverse=True
+)
+
+# Gate-passing ("advance") signals and the ONLY roles allowed to cast them.
+# A generator/assessor emitting one is forging a reviewer's ballot (DP3).
+_ADVANCE_EMITTERS = {
+    "PLAN_APPROVED": {"plan-reviewer"},
+    "PHASE_APPROVED": {"reviewer", "health-reviewer", "doc-reviewer"},
+    "GO": {"final-reviewer"},
+    "VERIFIED": {"reviewer"},  # verification-reviewer is spawned as subagent_type reviewer
+}
+
+
+def _signal_re(tok):
+    # A real signal is emitted as a verdict — alone on a line (the protocol says
+    # "end your response with: <SIGNAL>"), optionally wrapped in blockquote or
+    # list markers. Line-anchoring keeps prose mentions from matching.
+    return re.compile(r"(?m)^[ \t>*_-]*" + re.escape(tok) + r"[ \t.*_-]*$")
+
+
+_ADVANCE_RES = {k: _signal_re(k) for k in _ADVANCE_EMITTERS}
+_NEG_SIGNAL_RES = {
+    s: _signal_re(s) for s in ("REVISION_REQUIRED", "CHANGES_REQUESTED", "UNVERIFIED", "NO-GO")
+}
+
+# DP1 — instruction-injection phrasing in untrusted input (file content an agent
+# read). Conservative defaults; append one extra regex via
+# CLAUDE_FORGE_SECURITY_INJECTION_EXTRA.
+_INJECTION_PATTERNS = [
+    r"ignore\s+(?:all\s+|the\s+)?(?:previous|above|prior|earlier)\s+(?:instruction|direction|prompt)",
+    r"disregard\s+(?:your|the|all)\s+(?:instruction|system\s+prompt|guideline)",
+    r"\byou\s+are\s+now\s+(?:a|an|the)\b",
+    r"\bnew\s+instructions?\s*:",
+    r"</?(?:system|instructions|prompt)\b",
+    r"(?:record|cast|set|change)\s+your\s+(?:vote|verdict|decision)",
+    r"\bemit\s+(?:PHASE_APPROVED|PLAN_APPROVED|GO|VERIFIED)\b",
+]
+_inj_extra = os.environ.get("CLAUDE_FORGE_SECURITY_INJECTION_EXTRA", "").strip()
+if _inj_extra:
+    _INJECTION_PATTERNS.append(_inj_extra)
+try:
+    _INJECTION_RE = re.compile("|".join(_INJECTION_PATTERNS), re.IGNORECASE)
+except re.error:
+    _INJECTION_RE = re.compile("|".join(_INJECTION_PATTERNS[:-1]), re.IGNORECASE)
+
+# DP5 — text addressed to the orchestrator/aggregator ("tell the vote-counter
+# how to count").
+_AGGREGATOR_RE = re.compile(
+    r"\b(?:orchestrator|team\s*lead)\b\s*[:,].{0,80}\b(?:approve|skip|ignore|mark|proceed)\b"
+    r"|skip\s+the\s+(?:code\s+|plan\s+)?review"
+    r"|mark\s+(?:all\s+)?phases?\s+(?:as\s+)?(?:approved|complete)"
+    r"|approve\s+(?:all|every)\s+phase"
+    r"|do\s+not\s+(?:run|spawn|wait\s+for)\s+the\s+review"
+    r"|ignore\s+the\s+(?:dissenting\s+)?review",
+    re.IGNORECASE,
+)
+
+# DP4 — evidence a reviewer actually ran tests/build, and obviously
+# check-defeating commands.
+_TEST_CMD_RE = re.compile(
+    r"\b(?:pytest|unittest|tox|nox|jest|vitest|mocha|rspec|phpunit|bats|ctest"
+    r"|go\s+test|cargo\s+(?:test|nextest)|npm\s+(?:run\s+)?test|yarn\s+test"
+    r"|pnpm\s+(?:run\s+)?test|make\s+test|gradle\s+(?:test|check)|mvn\s+(?:test|verify)"
+    r"|npm\s+run\s+build|tsc\b|cargo\s+build|go\s+build|gradle\s+build|mvn\s+package)\b",
+    re.IGNORECASE,
+)
+_SUSPICIOUS_CMD_RE = re.compile(
+    r"--no-verify|\|\|\s*true\b|git\s+commit[^\n]*--no-verify"
+    r"|chmod\s+(?:-R\s+)?0?777|rm\s+-rf\s+[^\n]*test",
+    re.IGNORECASE,
+)
+
 
 def _exit_ok():
     sys.exit(0)
@@ -346,6 +437,284 @@ def _emit_anchor(otel, name, parent_ctx, attrs, start_ns):
     return carrier
 
 
+# ---------------- security helpers ----------------
+
+def _role_of(subagent_type, name):
+    """Resolve a subagent's role from trusted spawn metadata. Prefer
+    `subagent_type` (forge:<role>); fall back to keyword-matching the anchor
+    label for SendMessage continuations that don't carry a subagent_type."""
+    cand = (subagent_type or "").strip().lower()
+    if ":" in cand:
+        cand = cand.split(":")[-1]
+    if cand in _GENERATOR_ROLES or cand in _REVIEWER_ROLES or cand in _ASSESSOR_ROLES:
+        return cand
+    text = f"{cand} {(name or '').lower()}"
+    for role in _ALL_ROLES_BY_LEN:  # longest-first so plan-reviewer beats reviewer
+        if role in text:
+            return role
+    if "review" in text:
+        return "reviewer"
+    if "implement" in text:
+        return "implementer"
+    if "plan" in text:
+        return "planner"
+    return cand or "unknown"
+
+
+def _parse_subagent_io(sub_jsonl, cap=20000):
+    """From a subagent's JSONL transcript, return (read_texts, bash_commands):
+    read_texts are Read/Grep/Glob results (untrusted file content the agent
+    ingested); bash_commands are the commands it ran. Bounded + exception-safe."""
+    reads, bash = [], []
+    if not sub_jsonl:
+        return reads, bash
+    p = Path(sub_jsonl)
+    if not p.exists():
+        return reads, bash
+    uses = {}
+    try:
+        with p.open() as f:
+            for line in f:
+                try:
+                    d = json.loads(line)
+                except Exception:
+                    continue
+                msg = d.get("message") or {}
+                t = d.get("type")
+                if t == "assistant":
+                    for c in (msg.get("content") or []):
+                        if isinstance(c, dict) and c.get("type") == "tool_use":
+                            uses[c.get("id") or ""] = {
+                                "name": c.get("name") or "",
+                                "input": c.get("input") or {},
+                            }
+                elif t == "user":
+                    for c in (msg.get("content") or []):
+                        if isinstance(c, dict) and c.get("type") == "tool_result":
+                            u = uses.get(c.get("tool_use_id") or "")
+                            if not u or u["name"] not in ("Read", "Grep", "Glob"):
+                                continue
+                            cont = c.get("content")
+                            if isinstance(cont, list):
+                                cont = "\n".join(
+                                    b.get("text", "") for b in cont if isinstance(b, dict)
+                                )
+                            if isinstance(cont, str) and cont:
+                                reads.append(cont[:cap])
+        for u in uses.values():
+            if u["name"] == "Bash":
+                cmd = (u["input"] or {}).get("command") or ""
+                if cmd:
+                    bash.append(cmd[:cap])
+    except Exception:
+        pass
+    return reads, bash
+
+
+def _security_state(state_dir):
+    data = _read_carrier(state_dir, "_security.json")
+    if not isinstance(data, dict):
+        data = {}
+    data.setdefault("counts", {})
+    data.setdefault("findings", [])
+    data.setdefault("timeline", [])
+    data.setdefault("roles", [])
+    return data
+
+
+def _write_security_state(state_dir, data):
+    try:
+        (state_dir / "_security.json").write_text(json.dumps(data))
+    except Exception:
+        pass
+
+
+def _record_security_state(state_dir, role, advance, neg):
+    data = _security_state(state_dir)
+    if len(data["roles"]) < 300:
+        data["roles"].append(role)
+    if (advance or neg) and len(data["timeline"]) < 300:
+        data["timeline"].append({"role": role, "advance": advance, "neg": neg})
+    _write_security_state(state_dir, data)
+
+
+def _emit_security(otel, parent_carrier, state_dir, dp, kind, severity, agent, detail, ts_ns):
+    """Emit a security finding as its own short span (status ERROR for
+    visibility) and tally it for the session summary. Never raises."""
+    try:
+        parent_ctx = otel["propagator"].extract(carrier=parent_carrier or {})
+        span = otel["tracer"].start_span(
+            f"security:{dp}.{kind}", context=parent_ctx, start_time=ts_ns
+        )
+        span.set_attribute("security.defense_point", dp)
+        span.set_attribute("security.kind", kind)
+        span.set_attribute("security.severity", severity)
+        span.set_attribute("security.agent", agent or "")
+        span.set_attribute("security.detail", _truncate(detail, INPUT_LIMIT))
+        span.set_status(otel["Status"](otel["StatusCode"].ERROR, f"{dp}:{kind}"))
+        span.end(end_time=ts_ns + 1)
+    except Exception:
+        pass
+    try:
+        data = _security_state(state_dir)
+        data["counts"][dp] = data["counts"].get(dp, 0) + 1
+        if len(data["findings"]) < 100:
+            data["findings"].append(
+                {"dp": dp, "kind": kind, "severity": severity,
+                 "agent": agent, "detail": _truncate(detail, 200)}
+            )
+        _write_security_state(state_dir, data)
+    except Exception:
+        pass
+
+
+def _security_analyze(otel, state_dir, saved, content, sub_jsonl, ts_ns):
+    """Per-subagent defense-point checks (DP1/DP3/DP4/DP5). Reads the role from
+    trusted spawn metadata, scans the agent's output and the file content it
+    ingested. Detection only; fully exception-guarded."""
+    if not TRACE_SECURITY:
+        return
+    try:
+        tool_input = saved.get("tool_input") or {}
+        role = _role_of(tool_input.get("subagent_type"), saved.get("name"))
+        carrier = saved.get("carrier") or {}
+        output = content if isinstance(content, str) else ""
+
+        advance_found = [s for s, rx in _ADVANCE_RES.items() if rx.search(output)]
+        neg_found = [s for s, rx in _NEG_SIGNAL_RES.items() if rx.search(output)]
+        _record_security_state(state_dir, role, advance_found, neg_found)
+
+        # DP3 — a generator/assessor casting a gate signal it cannot legitimately cast.
+        if advance_found and (role in _GENERATOR_ROLES or role in _ASSESSOR_ROLES):
+            _emit_security(
+                otel, carrier, state_dir, "dp3", "signal_forgery", "high", role,
+                f"role={role} emitted gate signal {','.join(advance_found)} it cannot cast",
+                ts_ns,
+            )
+
+        # DP5 — agent output addressed to the orchestrator/aggregator.
+        m = _AGGREGATOR_RE.search(output)
+        if m:
+            _emit_security(
+                otel, carrier, state_dir, "dp5", "aggregator_addressed_instruction", "high",
+                role, f"role={role} output directs the orchestrator: {m.group(0)[:120]}", ts_ns,
+            )
+
+        reads, bash_cmds = _parse_subagent_io(sub_jsonl)
+
+        # DP1 — injected instructions / forged ballots inside files the agent read.
+        flagged_inj = flagged_tok = False
+        for txt in reads:
+            if not flagged_inj:
+                mi = _INJECTION_RE.search(txt)
+                if mi:
+                    _emit_security(
+                        otel, carrier, state_dir, "dp1", "injected_instruction", "medium",
+                        role, f"role={role} ingested instruction-like text: {mi.group(0)[:100]}",
+                        ts_ns,
+                    )
+                    flagged_inj = True
+            if not flagged_tok:
+                for s, rx in _ADVANCE_RES.items():
+                    if rx.search(txt):
+                        _emit_security(
+                            otel, carrier, state_dir, "dp1", "forged_signal_in_input", "high",
+                            role, f"role={role} read input with standalone gate token {s}", ts_ns,
+                        )
+                        flagged_tok = True
+                        break
+            if flagged_inj and flagged_tok:
+                break
+
+        # DP4 — reviewer approved without running tests/build.
+        if advance_found and role in _REVIEWER_ROLES:
+            if not any(_TEST_CMD_RE.search(c) for c in bash_cmds):
+                _emit_security(
+                    otel, carrier, state_dir, "dp4", "approved_without_tests", "medium",
+                    role, f"role={role} emitted {','.join(advance_found)} with no test/build run",
+                    ts_ns,
+                )
+        # DP4 — check-defeating commands from any agent.
+        for c in bash_cmds:
+            if _SUSPICIOUS_CMD_RE.search(c):
+                _emit_security(
+                    otel, carrier, state_dir, "dp4", "suspicious_command", "medium",
+                    role, f"role={role} ran: {c[:140]}", ts_ns,
+                )
+                break
+    except Exception:
+        pass
+
+
+def _security_session_summary(otel, state_dir, root_carrier, span, end_ns):
+    """Session-level DP2 fan-out precondition + DP5 decision-starvation, then
+    write the per-session security summary onto the session_complete span."""
+    if not TRACE_SECURITY:
+        return
+    try:
+        data = _security_state(state_dir)
+        roles = data.get("roles") or []
+        timeline = data.get("timeline") or []
+
+        # DP2 — correlated-compromise precondition: multiple read-only assessors
+        # fanned out over the same input on the shared session model.
+        assessor_runs = sum(1 for r in roles if r in _ASSESSOR_ROLES)
+        if assessor_runs >= 2:
+            _emit_security(
+                otel, root_carrier, state_dir, "dp2", "shared_model_fanout", "info", "intake",
+                f"{assessor_runs} read-only assessors fanned out over the same input on the "
+                "shared session model (one injection could transfer to all)", end_ns,
+            )
+
+        # DP5 — a reviewer that only ever requested changes (denial of decision).
+        agg = {}
+        for t in timeline:
+            a = agg.setdefault(t.get("role") or "?", {"adv": 0, "neg": 0})
+            a["adv"] += len(t.get("advance") or [])
+            a["neg"] += len(t.get("neg") or [])
+        for r, a in agg.items():
+            if r in _REVIEWER_ROLES and a["neg"] >= 3 and a["adv"] == 0:
+                _emit_security(
+                    otel, root_carrier, state_dir, "dp5", "decision_starvation", "low", r,
+                    f"{r} returned {a['neg']} change requests with no approval", end_ns,
+                )
+
+        # Summary (re-read so the DP2/DP5 emits above are counted).
+        data = _security_state(state_dir)
+        counts = data.get("counts") or {}
+        total = sum(counts.values())
+        span.set_attribute("forge.security.findings_total", total)
+        span.set_attribute("forge.security.flagged", total > 0)
+        for dp in ("dp1", "dp2", "dp3", "dp4", "dp5"):
+            span.set_attribute(f"forge.security.{dp}", counts.get(dp, 0))
+        if timeline:
+            tl = ">".join(
+                f"{t.get('role')}:{'/'.join((t.get('advance') or []) + (t.get('neg') or []))}"
+                for t in timeline
+            )
+            span.set_attribute("forge.security.signal_timeline", _truncate(tl, OUTPUT_LIMIT))
+
+        # Persist a portable run summary so the Tier C trajectory validators
+        # (evaluation/check_run.py) can replay protocol invariants over a real
+        # run, not just synthetic fixtures. Chronological governance events +
+        # the security findings, in one small JSON artifact.
+        events = []
+        for t in timeline:
+            role = t.get("role")
+            for sig in (t.get("advance") or []) + (t.get("neg") or []):
+                events.append({"role": role, "signal": sig})
+        try:
+            (state_dir / "trace-summary.json").write_text(json.dumps({
+                "roles": roles,
+                "events": events,
+                "security": {"counts": counts, "findings": data.get("findings", [])},
+            }))
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+
 # ---------------- handlers ----------------
 
 def _ensure_root(otel, state_dir, session_id, prompt="", cwd="", transcript_path=""):
@@ -435,6 +804,8 @@ def _emit_session_complete(otel, payload, state_dir, is_error=False):
         span.set_status(otel["Status"](otel["StatusCode"].ERROR, "session ended in failure"))
     else:
         span.set_status(otel["Status"](otel["StatusCode"].OK))
+    # Session-level defense-in-depth summary (DP2 fan-out, DP5 starvation, counts).
+    _security_session_summary(otel, state_dir, root.get("carrier") or {}, span, end_ns)
     span.end(end_time=end_ns)
     _safe_flush(otel)
     # Mark complete; keep _root.json so subagent calls after a Stop can still
@@ -875,6 +1246,11 @@ def _handle_subagent_post(otel, payload, state_dir, tool_use_id):
             anchor_start_ns=start_ns,
             anchor_end_ns=end_ns,
         )
+
+    # Passive defense-in-depth pass: provenance, injected input, approve-without-
+    # tests, aggregator-directed instructions. Detection only; never blocks.
+    if TRACE_SECURITY:
+        _security_analyze(otel, state_dir, saved, content, sub_jsonl, end_ns)
 
     _safe_flush(otel)
 

@@ -228,6 +228,22 @@ This log survives OS wipes (it lives in the repo, not a local config directory) 
 - Roles are native subagents spawned by `subagent_type`; if a needed type is unavailable the orchestrator stops and reports rather than improvising a prompt
 - Write ownership enforced (orchestrator writes eval/audit docs; assessor subagents are read-only and cannot write them)
 
+## Defense-in-Depth Tracing
+
+A multi-agent pipeline has no perimeter — the attack surface is internal. Untrusted data (a comment in the codebase under review, an intake doc, a tool result) flows between agents, and a single injection can fan out. The classic failure mode is silent: the swarm does exactly what it was built to do, nothing errors, and the trace looks ordinary.
+
+Forge models this as five **defense points**, the places where an adversary acts, and turns the tracing hook into a passive monitor for each. The hook's leverage is that it reads every subagent's **role and actions from Claude Code's own transcript metadata** — which attacker-controlled text cannot forge — so it can attest provenance and re-derive consensus *out of band*, exactly the guarantees the in-band channel (DP3) and the model-aggregator (DP5) can't give themselves.
+
+| DP | Forge surface | Detection (span) | Enforcement already in place |
+|----|---------------|------------------|------------------------------|
+| DP1 Input boundary | Source files / intake docs an agent reads | `security:dp1.*` — injected instructions or a standalone gate token in read input | — (first-party threat model) |
+| DP2 Fan-out | Parallel read-only intake (3 evaluators / ≤5 auditors) on the shared model | `security:dp2.shared_model_fanout` (precondition) | Assessors are read-only (frontmatter `tools`) |
+| DP3 Inter-agent channel | Gate signals in agent output + `feedback.md` | `security:dp3.signal_forgery` — a generator/assessor casting a reviewer's ballot | Reviewers can't mutate source; signal authorization is role-checked |
+| DP4 Tool boundary | Reviewer trusts Bash test/build output | `security:dp4.approved_without_tests` / `suspicious_command` | No agent gets `Agent` (no nesting) |
+| DP5 Aggregation | Orchestrator reads agent output and routes | `security:dp5.aggregator_addressed_instruction` / `decision_starvation` | Orchestrator rules: never skip a reviewer, never self-answer |
+
+Findings are emitted as red (`StatusCode.ERROR`) spans and summarized on `session_complete` as `forge.security.*` attributes — a per-run, ASR-style surface in Jaeger. The layer is detection only (it never blocks), opt-in via `CLAUDE_FORGE_TRACE_SECURITY` (on by default with tracing), and is the natural foundation for an adversarial test tier that asserts on these signals. See the README *Security tracing* section for the span/knob reference.
+
 ## Prerequisites
 
 Claude Forge's orchestrator uses the `Agent` tool to spawn the native subagents in `agents/` (by `subagent_type`) and `SendMessage` to continue conversations with existing agents across review iterations. These tools are gated behind an experimental feature flag:

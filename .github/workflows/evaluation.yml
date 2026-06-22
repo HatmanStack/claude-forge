@@ -1,0 +1,49 @@
+name: Evaluation
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  # Tier A — deterministic structural contracts. Fast, no LLM, no network.
+  # Runs on every push/PR: the regression net for agent frontmatter, tool
+  # policy, wiring, and manifest consistency.
+  tier-a-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install test deps
+        run: python -m pip install --quiet pytest
+      - name: Run Tier A contract checks
+        run: python -m pytest evaluation/tier_a_contracts -v --tb=short --junitxml=eval_results/tier_a.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: tier-a-results
+          path: eval_results/tier_a.xml
+
+  # Tier C — trajectory validators against synthetic legal/illegal runs. The
+  # same validators run against real trace-summary.json artifacts via
+  # evaluation/check_run.py in nightly / pre-release jobs.
+  tier-c-trajectory:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install test deps
+        run: python -m pip install --quiet pytest
+      - name: Run Tier C trajectory checks
+        run: python -m pytest evaluation/tier_c_trajectory -v --tb=short --junitxml=eval_results/tier_c.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: tier-c-results
+          path: eval_results/tier_c.xml
