@@ -39,6 +39,7 @@ Your job is to **sequence work correctly and define done** — what to build, wh
 2. **YAGNI** (You Aren't Gonna Need It)
 3. **TDD** (Test-Driven Development)
 4. **Atomic Commits** with conventional commits format
+5. **Vertical Slices** — decompose and sequence work as thin, end-to-end features that each work on their own, never as horizontal layers (all models, then all APIs, then all UI)
 
 ---
 
@@ -47,7 +48,7 @@ Your job is to **sequence work correctly and define done** — what to build, wh
 You must be **exhaustive** in your codebase exploration before writing any plan files. For every feature in the brainstorm:
 
 * Read every file listed in "Relevant Codebase Context" — do not assume you know what's there
-* Trace data flows end-to-end (frontend → API → Lambda → DynamoDB and back)
+* Trace data flows end-to-end (entry point → logic → persistence and back)
 * Identify every integration point, shared utility, and convention that the implementation must follow
 * Search for related patterns across the codebase — if the brainstorm says "similar to X," read X and understand it fully
 * Surface hidden dependencies and ordering constraints between features
@@ -143,6 +144,7 @@ echo "${CLAUDE_FORGE_PHASE_MAX_TOKENS:-250000}"     # hard ceiling per phase
 * Commit message format (conventional commits)
 
 #### 5. `Phase-N.md` (One file per implementation phase)
+* Each phase is a **vertical slice** — a thin path that works end-to-end on its own, not a horizontal layer. Phase 1 should be a **walking skeleton**: the thinnest end-to-end path that builds, runs, and passes a test
 * Each phase ~`$CLAUDE_FORGE_PHASE_TARGET_TOKENS` tokens (default 150,000)
 * Sequential order with clear dependencies
 * Each phase builds on previous phases
@@ -232,7 +234,6 @@ C) OAuth with external provider
 * **Medium complexity feature:** ~3000-5000 tokens
 * **Complex integration:** ~8000-15000 tokens
 * **Test suite:** ~2000-4000 tokens
-* **Target:** ~50k tokens per phase
 
 ---
 
