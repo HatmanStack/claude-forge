@@ -5,6 +5,23 @@ All notable changes to Claude Forge will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.11.0] - 2026-07-01
+
+### Added
+
+- **`vertical slice` build-shape guidance** — the Planner now decomposes and sequences work as thin, end-to-end **vertical slices** instead of horizontal layers (all models, then all APIs, then all UI), and Phase 1 is called out as a **walking skeleton**: the thinnest end-to-end path that builds, runs, and passes a test. The Plan Reviewer gained a matching **Horizontal Layering** adversarial check so layer-by-layer phase plans get flagged, and the Implementer is told to preserve the slice order (get the end-to-end path working before polishing any single layer). The shared leading word keeps planning, review, and implementation aligned on the same build shape.
+
+### Changed
+
+- **Stack-neutral planning language** — the Planner's data-flow guidance no longer presumes an AWS serverless stack (`frontend → API → Lambda → DynamoDB`); it now reads `entry point → logic → persistence`, and the Plan Reviewer's test-strategy example references "a live database" instead of DynamoDB, so plans for non-serverless projects aren't nudged toward infrastructure they don't have.
+- **Pruned no-op role instructions** — removed reminder lines that merely restated a role's own body (`Be strict`, `Be thorough. Be honest.`, duplicate `USE TOOLS` / `READ PHASE-0 FIRST`), tightening the Reviewer, Plan Reviewer, Final Reviewer, and Implementer prompts.
+
+### Fixed
+
+- **Planner sediment** — corrected the `Files to Create` numbering (was `1, 2, 4, 5`, skipping `3`) and removed the stale `Token Estimation Guidelines` (per-task `~500–15000` tokens) that contradicted the env-driven `150k` per-phase budget.
+- **Pipeline routing** — the orchestrator's single-intake-doc branch now spells out the doc→flow map (`health-audit.md → repo-health-flow`, `eval.md → repo-eval-flow`, `doc-audit.md → doc-health-flow`) instead of referring to "the corresponding flow file" with no mapping.
+- **doc-health audit template** — dropped the orphan `CI Platform` field; it was emitted as `[from Step 1]` but never collected in Step 1, guaranteeing a blank or hallucinated value.
+
 ## [1.10.0] - 2026-06-22
 
 ### Added
