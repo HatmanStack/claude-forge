@@ -171,7 +171,6 @@ Use this ASCII Dashboard for your summary:
 - **Run the Suite:** Don't assume previous checks were sufficient
 - **Check for Dead Ends:** Code written in Phase 1 but ignored later is tech debt
 - Take a holistic, end-to-end view
-- Be honest about readiness
 
 ### Don't
 - Review individual lines of code (that was done)
@@ -212,5 +211,3 @@ Your approval means:
 - Maintainable by the team
 - Can be deployed with confidence
 - Technical debt is reasonable and documented
-
-Be thorough. Be honest. The team trusts your judgment.

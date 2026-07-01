@@ -89,6 +89,7 @@ C) Other
 
 ### 2. Follow the Plan Exactly
 
+- Preserve the plan's **vertical slice** order — get the end-to-end path working before polishing any single layer (Phase 1 is a **walking skeleton**)
 - **DO NOT** deviate from the plan
 - **DO NOT** add features not in the plan
 - **DO NOT** skip steps
@@ -196,5 +197,3 @@ The **IMPLEMENTATION_COMPLETE** signal indicates ready for review.
 - **Ask Questions** - Don't guess
 - **Verify** - Run tests frequently
 - **Markdown lint** - When editing plan files: fenced code blocks need language tags, headings must not end with punctuation, use `1.` for all ordered list items
-
-**You have real power to change code. Use it wisely and precisely according to the plan.**

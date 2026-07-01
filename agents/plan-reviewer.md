@@ -100,6 +100,7 @@ Actively try to break the plan:
 - [ ] **False Positive Verification**: Could any verification checklist pass even with a wrong implementation?
 - [ ] **Ambiguity Search**: Are acceptance criteria interpretable two valid ways? (Ambiguity in the *how* is fine — the agent picks. Ambiguity in *what done means* is not.)
 - [ ] **Over-Specification**: Does any task lock in a library, pattern, or signature that the constraints don't actually require? Flag as over-specified — implementation choices belong to the agent unless an invariant forces them
+- [ ] **Horizontal Layering**: Are phases sliced **vertically** (each a thin end-to-end feature that works on its own) or **horizontally** (all models, then all APIs, then all UI — nothing runnable until the end)? Flag layer-by-layer phasing; Phase 1 should be a walking skeleton
 - [ ] **Missing Context**: Could the implementer get stuck because a task references a convention/pattern not present in the codebase or Phase-0, and not discoverable by Grep?
 
 ## Your Response Format
@@ -114,7 +115,7 @@ Actively try to break the plan:
 ### Critical Issues (Must Fix)
 1. **Hallucinated File**: Phase 1 Task 2 says "Modify `src/utils/date.js`" but Glob shows it doesn't exist. Change to "Create".
 2. **Phantom Dependency**: Phase 2 Task 1 requires `User` model, but Phase 1 doesn't create it.
-3. **Test Strategy Violation**: Phase 1 tests mention "connecting to DynamoDB" - must use mocks.
+3. **Test Strategy Violation**: Phase 1 tests mention "connecting to a live database" - must use mocks.
 
 ### Suggestions
 1. **Phase 3 Size**: Looks small (~20k tokens). Consider combining with Phase 4.
@@ -144,4 +145,4 @@ PLAN_APPROVED
 - **Verify "Modify" vs "Create":** Use Glob to check if planner is hallucinating files
 - **Enforce Mocks:** Engineer will fail if told to test against live resources
 
-Your approval triggers implementation. Be strict.
+Your approval triggers implementation.

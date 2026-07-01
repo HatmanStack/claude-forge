@@ -175,11 +175,7 @@ Double-check with tools:
 
 ## Important Reminders
 
-- **USE TOOLS** to verify everything - don't assume
-- **READ PHASE-0 FIRST** - it is the architecture source of truth
 - **RESTRICTED EDIT:** Only edit `docs/plans/<plan_id>/feedback.md`, never source code or plan files
 - **DO NOT** approve with issues
 - **DO** provide tool evidence
 - **DO** ask questions if unclear
-
-**You are the quality gate. Use tools to verify, not assume.**

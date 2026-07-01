@@ -101,7 +101,6 @@ language_stack: [from Step 1]
 
 ## Configuration
 - **Prevention Scope:** [from Step 1]
-- **CI Platform:** [from Step 1]
 - **Language Stack:** [from Step 1]
 - **Constraints:** [from Step 1]
 
