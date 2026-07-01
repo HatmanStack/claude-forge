@@ -43,17 +43,9 @@ If `docs/plans/$ARGUMENTS/feedback.md` does not exist, create it with the empty 
 
 Report detected state to the user before continuing.
 
-## Pre-Flight: Role File Validation
+## Pre-Flight: Agent Availability
 
-Before spawning any agents, verify all required role prompt files exist using **Glob**:
-- `skills/pipeline/planner.md`
-- `skills/pipeline/plan_reviewer.md`
-- `skills/pipeline/health-hygienist.md`
-- `skills/pipeline/health-fortifier.md`
-- `skills/pipeline/health-reviewer.md`
-- `skills/pipeline/health-auditor.md`
-
-If any file is missing, **stop and report** which files are absent.
+All roles are native subagents discovered from the plugin's `agents/` directory (or `.claude/agents/` for a standalone install), so no role-file reading is required. If a needed `subagent_type` is unavailable, **stop and report** it.
 
 ## Stage 1: Initial Audit (already done by intake)
 
@@ -78,16 +70,11 @@ The planner reads `health-audit.md` instead of `brainstorm.md`. The planner crea
 
 ### 2a: Spawn Planner
 
-**Agent addressing:** All spawns follow the convention in `pipeline-protocol.md` — pass an explicit `name` at spawn as a human-readable label, then **capture the returned `agentId`** and route every subsequent `SendMessage(to=...)` to that captured id. The `name` string is not a routable address once the Agent call returns. Phase tags (`[HYGIENIST]`, `[FORTIFIER]`) select the role prompt but do not change the label: phase N is always labeled `implementer-phase-N` / `reviewer-phase-N`.
+**Agent addressing:** All spawns follow the convention in `pipeline-protocol.md` — pass an explicit `name` at spawn as a human-readable label, then **capture the returned `agentId`** and route every subsequent `SendMessage(to=...)` to that captured id. The `name` string is not a routable address once the Agent call returns. Phase tags (`[HYGIENIST]`, `[FORTIFIER]`) select the `subagent_type` but do not change the label: phase N is always labeled `implementer-phase-N` / `reviewer-phase-N`.
 
-- **Read** `planner.md` for the role prompt
-- Spawn an **Agent** with `name="planner"` (label only) and **capture the returned `agentId`** for subsequent SendMessage calls:
+- Spawn an **Agent** with `subagent_type="forge:planner"`, `name="planner"` (label only), and **capture the returned `agentId`** for subsequent SendMessage calls:
 
-```xml
-<role_prompt>
-[Contents of planner.md]
-</role_prompt>
-
+```text
 <task>
 Version: $ARGUMENTS
 Input document: docs/plans/$ARGUMENTS/health-audit.md (this replaces brainstorm.md)
@@ -124,19 +111,17 @@ Process phases sequentially. The orchestrator determines which implementer role 
 
 ### For [HYGIENIST] phases
 
-- **Read** `health-hygienist.md` for the role prompt
-- Spawn implementer agent with hygienist role prompt
-- After implementation, spawn **Health Reviewer** (`health-reviewer.md`) for review
+- Spawn implementer agent with subagent_type=forge:health-hygienist
+- After implementation, spawn **Health Reviewer** (subagent_type=forge:health-reviewer) for review
 - Loop until `PHASE_APPROVED` or max iterations
 
 ### For [FORTIFIER] phases
 
-- **Read** `health-fortifier.md` for the role prompt
-- Spawn implementer agent with fortifier role prompt
-- After implementation, spawn **Health Reviewer** (`health-reviewer.md`) for review
+- Spawn implementer agent with subagent_type=forge:health-fortifier
+- After implementation, spawn **Health Reviewer** (subagent_type=forge:health-reviewer) for review
 - Loop until `PHASE_APPROVED` or max iterations
 
-**Agent spawn format is the same as main SKILL.md Stage 2, substituting the appropriate role prompt.** Use `name="implementer-phase-N"` and `name="reviewer-phase-N"` as labels regardless of tag — the tag picks the prompt, not the label. **Capture the `agentId`** returned by each spawn and route every subsequent `SendMessage(to=...)` to that captured id, not to the name string.
+**Agent spawn format is the same as main SKILL.md Stage 2, substituting the appropriate `subagent_type`.** Use `name="implementer-phase-N"` and `name="reviewer-phase-N"` as labels regardless of tag — the tag picks the `subagent_type`, not the label. **Capture the `agentId`** returned by each spawn and route every subsequent `SendMessage(to=...)` to that captured id, not to the name string.
 
 Report between phases:
 ```text
@@ -150,14 +135,9 @@ After all phases are `PHASE_APPROVED`, run a single verification agent that veri
 
 ### 4a: Spawn Verification Agent
 
-- **Read** `reviewer.md` for the role prompt
-- Spawn **one Agent** with `name="verification-reviewer"` (label only) and **capture the returned `agentId`** in case a re-entry SendMessage is needed:
+- Spawn **one Agent** with `subagent_type="forge:reviewer"`, `name="verification-reviewer"` (label only), and **capture the returned `agentId`** in case a re-entry SendMessage is needed:
 
-```xml
-<role_prompt>
-[Contents of reviewer.md]
-</role_prompt>
-
+```text
 <task>
 Version: $ARGUMENTS
 

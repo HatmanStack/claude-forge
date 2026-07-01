@@ -37,37 +37,61 @@ Shared contract defining stage sequencing, signals, and communication channels f
 | AUDIT_COMPLETE          | Health Auditor  | Intake orchestrator                      | Health audit finished (intake only)                           |
 | DOC_AUDIT_COMPLETE      | Doc Auditor     | Intake orchestrator                      | Doc audit finished (intake only)                              |
 
-## Agent Addressing Convention
+## Agents Are Native Subagents
 
-`Agent` spawns in the pipeline pass an explicit `name` parameter **for human-readable labeling only** (tracing spans, transcripts, logs). The `name` is **not** the addressing handle — once an Agent call returns, the spawned subagent is only reachable via the `agentId` (a 16-char hex string) returned in the Agent tool's result metadata. Subsequent `SendMessage` calls **must** use that captured `agentId` as the `to` field. Addressing by `name` may collide, silently re-spawn, or fail outright once the original Agent call has returned.
+Every role in this pipeline is a **native Claude Code subagent** defined under the plugin's `agents/` directory (e.g. `agents/planner.md`). The role prompt lives in that file's body and its tool/model constraints live in its YAML frontmatter. The orchestrator does **not** read role files or inject `<role_prompt>` blocks — it spawns a role by its **subagent type** and passes only the `<task>` for that invocation.
 
-**Orchestrator responsibility:** every time you spawn an Agent that you may need to continue later (planner, plan reviewer, implementer, reviewer, verification reviewer), record the returned `agentId` in your scratch state so it's available for the next `SendMessage`. Keep the canonical labels below for the `name=` field so traces and feedback.md references stay readable.
+### Spawning a Role: `subagent_type`
 
-| Slot | `name` (label only) | Addressed by |
-|------|--------------------|--------------|
-| Planner | `planner` | captured `agentId` |
-| Plan Reviewer | `plan-reviewer` | captured `agentId` |
-| Implementer (phase N, any tag) | `implementer-phase-N` | captured `agentId` |
-| Reviewer (phase N, any tag) | `reviewer-phase-N` | captured `agentId` |
-| Final Reviewer | `final-reviewer` | captured `agentId` |
-| Verification Reviewer | `verification-reviewer` | captured `agentId` |
+When you spawn an `Agent`, set `subagent_type` to the role's type and `name` to a human-readable label. The subagent definition supplies the system prompt; your `Agent` `prompt` carries only the task.
 
-The phase tag (`[HYGIENIST]`, `[FORTIFIER]`, `[IMPLEMENTER]`, `[DOC-ENGINEER]`) determines which role prompt is loaded at spawn — it does **not** change the label. Phase 3 tagged `[HYGIENIST]` is still labeled `implementer-phase-3` / `reviewer-phase-3`.
+| Role | `subagent_type` | `name` (label only) |
+|------|-----------------|---------------------|
+| Planner | `forge:planner` | `planner` |
+| Plan Reviewer | `forge:plan-reviewer` | `plan-reviewer` |
+| Implementer | `forge:implementer` | `implementer-phase-N` |
+| Code Reviewer | `forge:reviewer` | `reviewer-phase-N` |
+| Final Reviewer | `forge:final-reviewer` | `final-reviewer` |
+| Health Hygienist | `forge:health-hygienist` | `implementer-phase-N` |
+| Health Fortifier | `forge:health-fortifier` | `implementer-phase-N` |
+| Health Reviewer | `forge:health-reviewer` | `reviewer-phase-N` |
+| Doc Engineer | `forge:doc-engineer` | `implementer-phase-N` |
+| Doc Reviewer | `forge:doc-reviewer` | `reviewer-phase-N` |
+| Verification Reviewer | `forge:reviewer` | `verification-reviewer` |
+| Eval — Pragmatist | `forge:eval-hire` | `eval-hire` |
+| Eval — Oncall | `forge:eval-stress` | `eval-stress` |
+| Eval — Team Lead | `forge:eval-day2` | `eval-day2` |
+| Health Auditor | `forge:health-auditor` | `health-auditor` |
+| Doc Auditor | `forge:doc-auditor` | `doc-auditor` |
+
+The phase tag (`[HYGIENIST]`, `[FORTIFIER]`, `[IMPLEMENTER]`, `[DOC-ENGINEER]`) selects which `subagent_type` to spawn for that phase — it does **not** change the label. Phase 3 tagged `[HYGIENIST]` spawns `forge:health-hygienist` / `forge:health-reviewer` but is still labeled `implementer-phase-3` / `reviewer-phase-3`.
+
+> **Standalone install:** the `forge:` prefix is the plugin scope. If Forge was copied directly into a project (`agents/` → `.claude/agents/`), the same roles are addressed without the prefix — `planner` instead of `forge:planner`. Use whichever form resolves in your install.
+
+### Addressing for Iteration: capture the `agentId`
+
+This pipeline is **sequential**: it spawns each role in the foreground and **waits for it to return** before doing anything else. Live, concurrent teammates can be addressed by `name`, but a role that has already returned is a *completed* agent — and a completed agent is resumed by its **`agentId`**, not its name. The Agent tool's own result says so explicitly (e.g. *"use SendMessage with to: '<agentId>' to continue this agent"*).
+
+So here the `name` is a label only (traces, transcripts, feedback.md references). Once an `Agent` call returns, capture the `agentId` (a 16-char hex string) from its result metadata and use that as the `to` for every subsequent `SendMessage`. Addressing a returned role by its `name` may collide, silently re-spawn a fresh agent, or fail.
+
+**Orchestrator responsibility:** every time you spawn a role you may continue later (planner, plan reviewer, implementer, reviewer, verification reviewer), record the returned `agentId` in scratch state for the next `SendMessage`.
+
+> Team coordination tools (`SendMessage` and task tools) are always available to a teammate even when its frontmatter `tools` list restricts other tools — so a read-only reviewer can still be messaged and can still reply.
 
 ### Worked Example
 
 ```text
-# Spawn planner — capture the agentId from the result metadata
-result = Agent(name="planner", prompt="<role_prompt>...</role_prompt><task>...</task>")
+# Spawn planner by type — capture the agentId from the result metadata
+result = Agent(subagent_type="forge:planner", name="planner", prompt="<task>...</task>")
 planner_id = result.agentId        # e.g. "a1b2c3d4e5f6a7b8" — record this
 → planner finishes with PLAN_COMPLETE
 
-# Spawn plan reviewer — capture its agentId too
-result = Agent(name="plan-reviewer", prompt="...")
+# Spawn plan reviewer by type — capture its agentId too
+result = Agent(subagent_type="forge:plan-reviewer", name="plan-reviewer", prompt="<task>...</task>")
 plan_reviewer_id = result.agentId
 → reviewer finishes with REVISION_REQUIRED
 
-# Revise — SAME planner, addressed by the captured agentId
+# Revise — SAME planner, addressed by the captured agentId (no re-spawn)
 SendMessage(to=planner_id, message="Read feedback.md OPEN PLAN_REVIEW items...")
 → planner finishes with PLAN_COMPLETE
 
@@ -76,7 +100,7 @@ SendMessage(to=plan_reviewer_id, message="Re-review the revised plan...")
 → reviewer finishes with PLAN_APPROVED
 ```
 
-**Never** `SendMessage(to="planner")` or `SendMessage(to="<any name string>")` — the name is a label, not a routable address. Always use the captured `agentId` from the spawn result. If you lost the id (new session, missing scratch state), spawn a fresh agent with the same `name` label rather than guessing.
+**Never** `SendMessage(to="planner")` or `SendMessage(to="<any name string>")` — the name is a label, not a routable address. Always use the captured `agentId`. If you lost the id (new session, missing scratch state), spawn a fresh agent of the same `subagent_type` with the same `name` label rather than guessing.
 
 ## Communication Channel: feedback.md
 

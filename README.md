@@ -30,9 +30,13 @@ When installed as a plugin, skills are prefixed with `forge:` — e.g. `/forge:p
 **Standalone** (copy into any project):
 ```bash
 cp -r skills/ /path/to/your-project/.claude/skills/
+cp -r agents/ /path/to/your-project/.claude/agents/
 # Or personal (all projects)
 cp -r skills/ ~/.claude/skills/
+cp -r agents/ ~/.claude/agents/
 ```
+
+Copy **both** `skills/` and `agents/` — the pipeline roles are native Claude Code subagents that live in `agents/`. When installed standalone, the orchestrator addresses them without the `forge:` plugin prefix (e.g. `planner` instead of `forge:planner`).
 
 Requires [Claude Code](https://docs.anthropic.com/en/docs/claude-code) v1.0.33+ and a git-initialized project.
 
@@ -123,6 +127,22 @@ claude-forge/
 │   └── install-tracing.sh          # Optional Jaeger/OpenTelemetry setup
 ├── hooks/
 │   └── trace_subagents.py          # Tracing hook (installed via bin/install-tracing.sh)
+├── agents/                         # Native subagents (the "team") — auto-discovered as forge:<name>
+│   ├── planner.md                  # Generator — shared across all flows
+│   ├── plan-reviewer.md            # Discriminator — shared across all flows
+│   ├── implementer.md              # Generator — feature + repo-eval flows
+│   ├── reviewer.md                 # Discriminator — feature + repo-eval + verification
+│   ├── final-reviewer.md           # Discriminator — feature flow only
+│   ├── eval-hire.md                # The Pragmatist (read-only)
+│   ├── eval-stress.md              # The Oncall Engineer (read-only)
+│   ├── eval-day2.md                # The Team Lead (read-only)
+│   ├── health-auditor.md           # Pure assessment, no fix guidance (read-only)
+│   ├── health-hygienist.md         # Generator — subtractive (delete, simplify)
+│   ├── health-fortifier.md         # Generator — additive (lint, CI, hooks)
+│   ├── health-reviewer.md          # Discriminator — reviews hygienist + fortifier
+│   ├── doc-auditor.md              # 6-phase drift detection (read-only)
+│   ├── doc-engineer.md             # Generator — fix docs + add prevention
+│   └── doc-reviewer.md             # Discriminator — reviews doc changes
 ├── skills/
 │   ├── audit/SKILL.md              # Combined audit runner
 │   ├── brainstorm/SKILL.md
@@ -131,22 +151,7 @@ claude-forge/
 │   ├── doc-health/SKILL.md
 │   └── pipeline/
 │       ├── SKILL.md                # Orchestrator (routes by intake doc type)
-│       ├── pipeline-protocol.md    # Signal protocol spec
-│       ├── planner.md              # Shared across all flows
-│       ├── plan_reviewer.md        # Shared across all flows
-│       ├── implementer.md          # Feature + repo-eval flows
-│       ├── reviewer.md             # Feature + repo-eval flows
-│       ├── final_reviewer.md       # Feature flow only
-│       ├── eval-hire.md            # The Pragmatist
-│       ├── eval-stress.md          # The Oncall Engineer
-│       ├── eval-day2.md            # The Team Lead
-│       ├── health-auditor.md       # Pure assessment, no fix guidance
-│       ├── health-hygienist.md     # Subtractive (delete, simplify)
-│       ├── health-fortifier.md     # Additive (lint, CI, hooks)
-│       ├── health-reviewer.md      # Reviews both hygienist + fortifier
-│       ├── doc-auditor.md          # 6-phase drift detection
-│       ├── doc-engineer.md         # Fix docs + add prevention
-│       ├── doc-reviewer.md         # Reviews doc changes
+│       ├── pipeline-protocol.md    # Signal protocol + subagent-type spec
 │       └── flows/
 │           ├── audit-flow.md       # Unified plan across multiple audit types
 │           ├── repo-eval-flow.md
@@ -157,6 +162,23 @@ claude-forge/
 ├── CHANGELOG.md
 └── LICENSE
 ```
+
+Each role is a **native Claude Code subagent**: its prompt is the file body and its tool/model access is declared in YAML frontmatter. Generators get write access (`Read, Write, Edit, Glob, Grep, Bash`); reviewers are restricted to `feedback.md` edits (`Read, Glob, Grep, Bash, Edit`); evaluators and auditors are strictly read-only (`Read, Glob, Grep, Bash`). The orchestrator skills spawn each role by `subagent_type` (e.g. `forge:planner`) and continue iteration loops with `SendMessage` — no role-prompt text is injected.
+
+## Evaluation
+
+Forge is itself an evaluation system, so it ships an evaluation harness for *its own* team — the regression net that keeps agents, tools, and the orchestrator honest as they change. It follows an evaluation pyramid (fast/deterministic at the base, realistic at the top):
+
+- **Tier A — Contracts** (`evaluation/tier_a_contracts/`): deterministic checks of agent frontmatter, per-role tool policy (generators write, reviewers read-only over source, assessors fully read-only, no agent nests), wiring (`forge:<type>` references resolve), and manifest consistency. Runs on every push/PR — pure stdlib + pytest, no LLM.
+- **Tier C — Trajectory** (`evaluation/tier_c_trajectory/`): validates the sequence of governance signals against the protocol — signal provenance (no forged approvals), gate order, and no skipped reviews. Synthetic fixtures per-PR; real runs via `evaluation/check_run.py` against the trace hook's `trace-summary.json`.
+- **Tier D — Live traces**: the OpenTelemetry → Jaeger hook (below), including the `security:dp{1..5}.*` defense-in-depth spans.
+
+```bash
+python -m pip install pytest
+python -m pytest evaluation/ -v
+```
+
+See [evaluation/README.md](evaluation/README.md) for the full pyramid and the live-run trajectory check. CI runs Tiers A and C on every push and pull request (`.github/workflows/evaluation.yml`).
 
 ## Tracing (optional)
 
@@ -287,9 +309,27 @@ The deployed hook lives at `~/.local/share/claude-forge/trace_subagents.py`. Eve
 | `CLAUDE_FORGE_TRACE_MUTATION_TOOLS` | `Write,Edit,MultiEdit` | Comma-separated list of tools traced as mutations. `Bash` is **excluded by default** because pipeline runs invoke it hundreds of times (git, npm, tests, ls) and the noise drowns out Write/Edit visibility. Add it back via `CLAUDE_FORGE_TRACE_MUTATION_TOOLS="Write,Edit,MultiEdit,Bash"` if you need Bash spans. |
 | `CLAUDE_FORGE_TRACE_INNER` | unset | Also trace *non-mutational* inner tools (Read/Glob/Grep/etc.). Off by default — a `/pipeline` can fire 200+ such calls. |
 | `CLAUDE_FORGE_TRACE_TOOL_BLOCKLIST` | `Read,Glob,Grep,TodoWrite,NotebookRead` | When inner tracing is on, comma-separated tools to skip. Empty string disables the blocklist |
+| `CLAUDE_FORGE_TRACE_SECURITY` | `1` (on) | Defense-in-depth detection layer (see below). Emits `security:dp{1..5}.*` spans and a per-session summary. Detection only — never blocks a tool call. Set `0` to disable. |
+| `CLAUDE_FORGE_SECURITY_INJECTION_EXTRA` | unset | Optional extra regex appended to the DP1 instruction-injection pattern set (for repo-specific markers) |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4317` | OTLP/gRPC endpoint for any backend (Jaeger, Tempo, Honeycomb, etc.) |
 | `CLAUDE_FORGE_PHASE_TARGET_TOKENS` | `150000` | Target token budget per pipeline phase (Stage size). Read by the Planner when sizing phases and by the Plan Reviewer when judging them. Smaller values produce more, smaller phases; larger values produce fewer, larger phases. |
 | `CLAUDE_FORGE_PHASE_MAX_TOKENS` | `250000` | Hard ceiling per phase — Planner must not exceed this and Plan Reviewer flags phases above it (context-pressure risk). |
+
+### Security tracing (defense in depth)
+
+A multi-agent pipeline can be subverted without a single error in the logs — a poisoned file comment, a forged approval signal, or a reviewer that rubber-stamps. When `CLAUDE_FORGE_TRACING=1`, Forge adds a **passive detection layer** that makes those events visible in Jaeger. It reads each subagent's role and actions from Claude Code's own transcript metadata — which file/text content can't forge — so it can attest signal provenance and audit consensus out of band. It is **detection only**: it never blocks a tool call or changes pipeline flow, and it's tuned for first-party repos (low false positives). Disable with `CLAUDE_FORGE_TRACE_SECURITY=0`.
+
+Findings surface as `security:dp{1..5}.*` spans (red, status ERROR) plus `forge.security.*` attributes on the `session_complete` span (`findings_total`, per-DP counts, `flagged`, and a `signal_timeline`):
+
+| Span | Defense point | Fires when |
+|------|---------------|-----------|
+| `security:dp1.injected_instruction` / `…forged_signal_in_input` | Input boundary | An agent read a file containing instruction-like text or a standalone gate token (e.g. an injected `PHASE_APPROVED`) |
+| `security:dp2.shared_model_fanout` | Fan-out | ≥2 read-only assessors fanned out over the same input on the shared session model (correlated-compromise precondition) |
+| `security:dp3.signal_forgery` | Inter-agent channel | A generator/assessor emitted a gate signal it isn't authorized to cast (forged ballot) |
+| `security:dp4.approved_without_tests` / `…suspicious_command` | Tool boundary | A reviewer approved without running tests/build, or any agent ran a check-defeating command (`--no-verify`, `\|\| true`, …) |
+| `security:dp5.aggregator_addressed_instruction` / `…decision_starvation` | Aggregation | An agent's output tried to instruct the orchestrator, or a reviewer only ever requested changes (denial of decision) |
+
+Query `security.severity=high` in Jaeger to triage, or alert on `forge.security.flagged=true`. The frontmatter tool lockdown (reviewers can't mutate source; no agent gets `Agent`) is the matching *enforcement* layer — a blocked attempt shows up as a `permission_denied:*` span.
 
 ## License
 

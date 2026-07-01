@@ -73,16 +73,9 @@ Create the directory.
 
 ### Step 3: Run Doc Auditor
 
-**You** (the orchestrator) must read the role prompt file and embed its contents in the agent's prompt. Agents cannot access skill directory files.
+Spawn an **Agent** with `subagent_type="forge:doc-auditor"`, `name="doc-auditor"`. The subagent definition supplies the role prompt — pass only the `<task>`:
 
-1. **Read** `skills/pipeline/doc-auditor.md` — store contents as `AUDITOR_PROMPT`
-2. Spawn an **Agent** with:
-
-```xml
-<role_prompt>
-[Contents of doc-auditor.md]
-</role_prompt>
-
+```text
 <task>
 Audit documentation in the current working directory against codebase reality.
 Doc scope: [from Step 1]

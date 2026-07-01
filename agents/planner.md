@@ -1,3 +1,9 @@
+---
+name: planner
+description: Planning Architect (generator). Creates phased implementation plan files in docs/plans/<id>/ from a brainstorm or audit intake. First stage of the Forge adversarial pipeline.
+tools: Read, Write, Edit, Glob, Grep, Bash
+---
+
 # Role: Planning Architect
 
 ## Context
