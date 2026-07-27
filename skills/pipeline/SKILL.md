@@ -68,11 +68,11 @@ Report the detected state to the user before continuing.
 
 **One Planner agent and one Plan Reviewer agent for the entire planning stage.** Spawn each once, then use `SendMessage` for subsequent iterations.
 
-**Agent addressing:** Every spawn sets `subagent_type` to the role and passes an explicit `name` as a **human-readable label only** (traces, logs, feedback.md references). Capture the `agentId` from each Agent spawn result and store it in scratch state; every `SendMessage(to=...)` must use that captured `agentId`, never the name string. See `pipeline-protocol.md` → *Agents Are Native Subagents*.
+**Agent addressing:** Every spawn sets `subagent_type` to the role and passes an explicit `name`. Address the agent by that same bare `name` in every subsequent `SendMessage(to=...)` — names stay routable after an agent finishes, and the composite `name@session-<hex>` id is rejected. See `pipeline-protocol.md` → *Agents Are Native Subagents*.
 
 ### 1a: Spawn Planner (once)
 
-- Spawn an **Agent** with `subagent_type="forge:planner"`, `name="planner"` (label only), and **capture the returned `agentId`** for subsequent SendMessage calls. Pass only the task:
+- Spawn an **Agent** with `subagent_type="forge:planner"`, `name="planner"`, reusing that name for subsequent SendMessage calls. Pass only the task:
 
 ```xml
 <task>
@@ -92,7 +92,7 @@ When complete, end your response with: PLAN_COMPLETE
 
 ### 1b: Spawn Plan Reviewer (once)
 
-- Spawn an **Agent** with `subagent_type="forge:plan-reviewer"`, `name="plan-reviewer"` (label only), and **capture the returned `agentId`**:
+- Spawn an **Agent** with `subagent_type="forge:plan-reviewer"`, `name="plan-reviewer"`:
 
 ```xml
 <task>
@@ -110,7 +110,7 @@ If plan is good: end with: PLAN_APPROVED
 
 - Check the reviewer's signal:
   - `PLAN_APPROVED` → proceed to Stage 2
-  - `REVISION_REQUIRED` → use **SendMessage** with `to=<captured planner agentId>`:
+  - `REVISION_REQUIRED` → use **SendMessage** with `to="planner"`:
 
 ```text
 The Plan Reviewer has requested revisions. Read docs/plans/$ARGUMENTS/feedback.md for OPEN items tagged PLAN_REVIEW.
@@ -120,7 +120,7 @@ Address each item by revising the plan files. Move resolved feedback to the "Res
 When complete, end your response with: PLAN_COMPLETE
 ```
 
-- After the planner responds, use **SendMessage** with `to=<captured plan-reviewer agentId>`:
+- After the planner responds, use **SendMessage** with `to="plan-reviewer"`:
 
 ```text
 The Planner has revised the plan. Re-review the changes:
@@ -178,7 +178,7 @@ Continuing from Phase N...
 
 #### 2a: Spawn Implementer (once per phase)
 
-- Spawn an **Agent** with `subagent_type="forge:implementer"`, `name="implementer-phase-N"` (label only — substitute the actual phase number), and **capture the returned `agentId`** under a key like `implementer_phase_N_id`:
+- Spawn an **Agent** with `subagent_type="forge:implementer"`, `name="implementer-phase-N"` (substitute the actual phase number), reusing that name for subsequent SendMessage calls:
 
 ```xml
 <task>
@@ -199,7 +199,7 @@ When complete, end your response with: IMPLEMENTATION_COMPLETE
 
 #### 2b: Spawn Reviewer (once per phase)
 
-- Spawn an **Agent** with `subagent_type="forge:reviewer"`, `name="reviewer-phase-N"` (label only — substitute the actual phase number), and **capture the returned `agentId`** under a key like `reviewer_phase_N_id`:
+- Spawn an **Agent** with `subagent_type="forge:reviewer"`, `name="reviewer-phase-N"` (substitute the actual phase number), reusing that name for subsequent SendMessage calls:
 
 ```xml
 <task>
@@ -222,7 +222,7 @@ If implementation is good: end with: PHASE_APPROVED
 
 - Check the reviewer's signal:
   - `PHASE_APPROVED` → report to user, move to next phase
-  - `CHANGES_REQUESTED` → use **SendMessage** with `to=<captured implementer-phase-N agentId>`:
+  - `CHANGES_REQUESTED` → use **SendMessage** with `to="implementer-phase-N"`:
 
 ```text
 The Code Reviewer has requested changes. Read docs/plans/$ARGUMENTS/feedback.md for OPEN items tagged CODE_REVIEW.
@@ -232,7 +232,7 @@ Address each item. Move resolved feedback to "Resolved Feedback" with a resoluti
 When complete, end your response with: IMPLEMENTATION_COMPLETE
 ```
 
-- After the implementer responds, use **SendMessage** with `to=<captured reviewer-phase-N agentId>`:
+- After the implementer responds, use **SendMessage** with `to="reviewer-phase-N"`:
 
 ```text
 The Implementer has addressed the feedback. Re-review the changes:
@@ -258,7 +258,7 @@ Remaining phases: [list]
 
 After all phases are approved:
 
-- Spawn an **Agent** with `subagent_type="forge:final-reviewer"`, `name="final-reviewer"` (label only). Capturing the returned `agentId` is optional here — unlike the other stages, the Final Reviewer runs once and is never resumed via `SendMessage` (a NO-GO surfaces to the user rather than re-entering a loop):
+- Spawn an **Agent** with `subagent_type="forge:final-reviewer"`, `name="final-reviewer"`. You will not need to message it again — unlike the other stages, the Final Reviewer runs once and is never resumed via `SendMessage` (a NO-GO surfaces to the user rather than re-entering a loop):
 
 ```xml
 <task>
@@ -360,7 +360,7 @@ B) Manually resolve and continue
 ### Agent Spawning
 
 - **ONE agent at a time.** Every stage runs a single foreground agent. Wait for it to complete fully before deciding the next step.
-- **ONE Implementer and ONE Reviewer per phase.** Spawn each once with the role's `subagent_type` and canonical `name` label from `pipeline-protocol.md`, **capture the returned `agentId`**, then use `SendMessage(to=<captured agentId>)` for subsequent iterations. Never spawn a new agent for the same role within a phase. Never address by role description or by the `name` string — names are labels, only the captured `agentId` is routable.
+- **ONE Implementer and ONE Reviewer per phase.** Spawn each once with the role's `subagent_type` and canonical `name` from `pipeline-protocol.md`, then use `SendMessage(to="<name>")` for subsequent iterations. Never spawn a new agent for the same role within a phase. Never address by role description — use the exact `name` you spawned with.
 - **NO duplicate or replacement agents.** If an agent is slow, wait. Agents can take 20+ minutes on large codebases. Do NOT spawn a second agent for the same work.
 - **NO per-phase planners.** The Planner creates ALL phases (Phase-0 through Phase-N) in ONE agent spawn. Never decompose planning into separate agents per phase.
 - **NO parallel agents.** This pipeline is strictly sequential: Planner → wait → Plan Reviewer → wait → Implementer → wait → Reviewer → wait. Never overlap stages.

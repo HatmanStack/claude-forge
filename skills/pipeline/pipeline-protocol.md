@@ -43,9 +43,9 @@ Every role in this pipeline is a **native Claude Code subagent** defined under t
 
 ### Spawning a Role: `subagent_type`
 
-When you spawn an `Agent`, set `subagent_type` to the role's type and `name` to a human-readable label. The subagent definition supplies the system prompt; your `Agent` `prompt` carries only the task.
+When you spawn an `Agent`, set `subagent_type` to the role's type and `name` to the canonical name below — you will reuse it to message the agent later. The subagent definition supplies the system prompt; your `Agent` `prompt` carries only the task.
 
-| Role | `subagent_type` | `name` (label only) |
+| Role | `subagent_type` | `name` |
 |------|-----------------|---------------------|
 | Planner | `forge:planner` | `planner` |
 | Plan Reviewer | `forge:plan-reviewer` | `plan-reviewer` |
@@ -68,39 +68,53 @@ The phase tag (`[HYGIENIST]`, `[FORTIFIER]`, `[IMPLEMENTER]`, `[DOC-ENGINEER]`) 
 
 > **Standalone install:** the `forge:` prefix is the plugin scope. If Forge was copied directly into a project (`agents/` → `.claude/agents/`), the same roles are addressed without the prefix — `planner` instead of `forge:planner`. Use whichever form resolves in your install.
 
-### Addressing for Iteration: capture the `agentId`
+### Addressing for Iteration: use the bare `name`
 
-This pipeline is **sequential**: it spawns each role in the foreground and **waits for it to return** before doing anything else. Live, concurrent teammates can be addressed by `name`, but a role that has already returned is a *completed* agent — and a completed agent is resumed by its **`agentId`**, not its name. The Agent tool's own result says so explicitly (e.g. *"use SendMessage with to: '<agentId>' to continue this agent"*).
+Spawn each role with an explicit `name`, and address it by that **same bare name** in every subsequent `SendMessage`. A name keeps working after an agent has finished — a send resumes it from its transcript.
 
-So here the `name` is a label only (traces, transcripts, feedback.md references). Once an `Agent` call returns, capture the `agentId` (a 16-char hex string) from its result metadata and use that as the `to` for every subsequent `SendMessage`. Addressing a returned role by its `name` may collide, silently re-spawn a fresh agent, or fail.
+Do **not** pass the composite id from the spawn result (the `name@session-<hex>` form). `SendMessage` rejects it:
 
-**Orchestrator responsibility:** every time you spawn a role you may continue later (planner, plan reviewer, implementer, reviewer, verification reviewer), record the returned `agentId` in scratch state for the next `SendMessage`.
+```text
+to must be a bare teammate name — there is only one team per session
+```
+
+There is one team per session, so names are unique within it and are the routable address. Use the raw `agentId` only when an agent has no name at all, or when a newer agent has taken the name (latest wins).
+
+**Names do not survive a session restart.** A restart kills running agents; `SendMessage` then returns `No agent named '<name>' is reachable`. That is a dead agent, not a bad address — spawn a fresh agent of the same `subagent_type` with the same `name`. Pipeline state lives in the plan files and `feedback.md`, so a lost agent costs context, not progress.
 
 > Team coordination tools (`SendMessage` and task tools) are always available to a teammate even when its frontmatter `tools` list restricts other tools — so a read-only reviewer can still be messaged and can still reply.
 
 ### Worked Example
 
 ```text
-# Spawn planner by type — capture the agentId from the result metadata
-result = Agent(subagent_type="forge:planner", name="planner", prompt="<task>...</task>")
-planner_id = result.agentId        # e.g. "a1b2c3d4e5f6a7b8" — record this
-→ planner finishes with PLAN_COMPLETE
+# Spawn planner by type, with a name you will reuse
+Agent(subagent_type="forge:planner", name="planner", prompt="<task>...</task>")
+→ planner reports PLAN_COMPLETE via SendMessage(to="main")
 
-# Spawn plan reviewer by type — capture its agentId too
-result = Agent(subagent_type="forge:plan-reviewer", name="plan-reviewer", prompt="<task>...</task>")
-plan_reviewer_id = result.agentId
-→ reviewer finishes with REVISION_REQUIRED
+# Spawn plan reviewer by type
+Agent(subagent_type="forge:plan-reviewer", name="plan-reviewer", prompt="<task>...</task>")
+→ reviewer reports REVISION_REQUIRED via SendMessage(to="main")
 
-# Revise — SAME planner, addressed by the captured agentId (no re-spawn)
-SendMessage(to=planner_id, message="Read feedback.md OPEN PLAN_REVIEW items...")
-→ planner finishes with PLAN_COMPLETE
+# Revise — SAME planner, addressed by its bare name (no re-spawn)
+SendMessage(to="planner", message="Read feedback.md OPEN PLAN_REVIEW items...")
+→ planner reports PLAN_COMPLETE
 
-# Re-review — SAME plan-reviewer, by its captured agentId
-SendMessage(to=plan_reviewer_id, message="Re-review the revised plan...")
-→ reviewer finishes with PLAN_APPROVED
+# Re-review — SAME plan-reviewer, by its bare name
+SendMessage(to="plan-reviewer", message="Re-review the revised plan...")
+→ reviewer reports PLAN_APPROVED
 ```
 
-**Never** `SendMessage(to="planner")` or `SendMessage(to="<any name string>")` — the name is a label, not a routable address. Always use the captured `agentId`. If you lost the id (new session, missing scratch state), spawn a fresh agent of the same `subagent_type` with the same `name` label rather than guessing.
+**Never** pass the composite `name@session-<hex>` id — `SendMessage` rejects it outright. Address roles by the bare `name` you spawned them with.
+
+### Signals Arrive by Message, Not by Return Value
+
+Agents run as teammates. An agent's plain-text output is **discarded** — only a `SendMessage(to="main")` call reaches the orchestrator. Every agent definition instructs its role to report this way; see each agent's *Reporting Results* section.
+
+Consequences for the orchestrator:
+
+- The `Agent` call returns as soon as the agent is spawned. It does **not** block, and its result never contains the agent's report.
+- A bare `idle_notification` with no accompanying message means the agent finished without reporting. Ask it to resend via `SendMessage(to="main")` rather than inferring its verdict.
+- **Never manufacture a signal you did not receive.** Reading `feedback.md` tells you what a reviewer *wrote*; it does not tell you a review ran. An approving pass writes nothing, so an unchanged `feedback.md` is indistinguishable from a review that never happened — that ambiguity must be resolved by asking the agent, not by assuming.
 
 ## Communication Channel: feedback.md
 

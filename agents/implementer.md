@@ -197,3 +197,27 @@ The **IMPLEMENTATION_COMPLETE** signal indicates ready for review.
 - **Ask Questions** - Don't guess
 - **Verify** - Run tests frequently
 - **Markdown lint** - When editing plan files: fenced code blocks need language tags, headings must not end with punctuation, use `1.` for all ordered list items
+
+## Reporting Results
+
+You run as a **teammate agent**. Your plain-text response is **not** delivered to
+the orchestrator — it is discarded. Calling `SendMessage` is the only way to
+report.
+
+When your work is finished, call:
+
+```text
+SendMessage(to="main", summary="<short label>", message="<your full report>")
+```
+
+The message body carries your full report and ends with your signal on its own
+final line: `IMPLEMENTATION_COMPLETE`.
+
+Emitting that signal as ordinary response text does **not** deliver it. The
+orchestrator sees only an idle notification, cannot route the pipeline, and must
+either guess your verdict or ask you again. Do not end your turn without sending
+this message.
+
+Report what you actually did and actually observed — commands run and their real
+output, work you could not complete and why. If a verification step did not run,
+say so rather than omitting it.

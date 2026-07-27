@@ -70,9 +70,9 @@ The planner reads `health-audit.md` instead of `brainstorm.md`. The planner crea
 
 ### 2a: Spawn Planner
 
-**Agent addressing:** All spawns follow the convention in `pipeline-protocol.md` — pass an explicit `name` at spawn as a human-readable label, then **capture the returned `agentId`** and route every subsequent `SendMessage(to=...)` to that captured id. The `name` string is not a routable address once the Agent call returns. Phase tags (`[HYGIENIST]`, `[FORTIFIER]`) select the `subagent_type` but do not change the label: phase N is always labeled `implementer-phase-N` / `reviewer-phase-N`.
+**Agent addressing:** All spawns follow the convention in `pipeline-protocol.md` — pass an explicit `name` at spawn and address the agent by that same bare `name` in every subsequent `SendMessage(to=...)`. Names remain routable after an agent finishes; the composite `name@session-<hex>` id is rejected. Phase tags (`[HYGIENIST]`, `[FORTIFIER]`) select the `subagent_type` but do not change the label: phase N is always labeled `implementer-phase-N` / `reviewer-phase-N`.
 
-- Spawn an **Agent** with `subagent_type="forge:planner"`, `name="planner"` (label only), and **capture the returned `agentId`** for subsequent SendMessage calls:
+- Spawn an **Agent** with `subagent_type="forge:planner"`, `name="planner"`, reusing that name for subsequent SendMessage calls:
 
 ```text
 <task>
@@ -121,7 +121,7 @@ Process phases sequentially. The orchestrator determines which implementer role 
 - After implementation, spawn **Health Reviewer** (subagent_type=forge:health-reviewer) for review
 - Loop until `PHASE_APPROVED` or max iterations
 
-**Agent spawn format is the same as main SKILL.md Stage 2, substituting the appropriate `subagent_type`.** Use `name="implementer-phase-N"` and `name="reviewer-phase-N"` as labels regardless of tag — the tag picks the `subagent_type`, not the label. **Capture the `agentId`** returned by each spawn and route every subsequent `SendMessage(to=...)` to that captured id, not to the name string.
+**Agent spawn format is the same as main SKILL.md Stage 2, substituting the appropriate `subagent_type`.** Use `name="implementer-phase-N"` and `name="reviewer-phase-N"` as labels regardless of tag — the tag picks the `subagent_type`, not the label. Address each agent by the bare `name` you spawned it with in every subsequent `SendMessage(to=...)`.
 
 Report between phases:
 ```text
@@ -135,7 +135,7 @@ After all phases are `PHASE_APPROVED`, run a single verification agent that veri
 
 ### 4a: Spawn Verification Agent
 
-- Spawn **one Agent** with `subagent_type="forge:reviewer"`, `name="verification-reviewer"` (label only), and **capture the returned `agentId`** in case a re-entry SendMessage is needed:
+- Spawn **one Agent** with `subagent_type="forge:reviewer"`, `name="verification-reviewer"`, reusing that name if a re-entry SendMessage is needed:
 
 ```text
 <task>

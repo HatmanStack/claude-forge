@@ -5,6 +5,18 @@ All notable changes to Claude Forge will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.12.0] - 2026-07-27
+
+### Added
+
+- **`Reporting Results` section on all 15 roles** — every agent definition now ends with an explicit contract: a teammate's plain-text response is discarded, so `SendMessage(to="main", summary=..., message=...)` is the only way to reach the orchestrator. The message body carries the full report and ends with that role's signal on its own final line (`PLAN_COMPLETE`, `PHASE_APPROVED` / `CHANGES_REQUESTED`, `GO` / `NO-GO`, the audit/eval `*_COMPLETE` signals, …). Roles are also told to report what they actually ran and observed, and to say so when a verification step did not run, rather than omitting it. Previously roles were only told to "end your response with" a signal — output that never left the subagent, leaving the orchestrator with a bare idle notification and no verdict.
+- **`Signals Arrive by Message, Not by Return Value`** (`pipeline-protocol.md`) — the orchestrator side of the same contract: the `Agent` call does not block and never carries the agent's report; a bare `idle_notification` with no message means the agent finished without reporting and must be asked to resend. Also states the rule that closes the forged-approval gap: **never manufacture a signal you did not receive** — an approving review writes nothing to `feedback.md`, so an unchanged `feedback.md` cannot be read as evidence that a review ran.
+
+### Fixed
+
+- **Agent addressing reverted to the bare `name`** — 1.11.0's guidance to capture each spawn's `agentId` and route every `SendMessage` to it was wrong in both directions: the composite `name@session-<hex>` id from the spawn result is rejected outright (`to must be a bare teammate name — there is only one team per session`), and a bare name stays routable after an agent finishes, resuming it from its transcript. Every spawn site across `pipeline-protocol.md`, `SKILL.md`, and the four flow files (`audit`, `doc-health`, `repo-eval`, `repo-health`) now spawns with a canonical `name` and reuses that same name for continuations. The raw `agentId` is reserved for the two cases where a name doesn't resolve: an unnamed agent, or a name taken over by a newer agent (latest wins).
+- **Lost-agent recovery** — the protocol now distinguishes a bad address from a dead agent: names do not survive a session restart, so `No agent named '<name>' is reachable` means the agent was killed, not misaddressed. Recovery is to spawn a fresh agent of the same `subagent_type` under the same `name` — pipeline state lives in the plan files and `feedback.md`, so a lost agent costs context, not progress.
+
 ## [1.11.0] - 2026-07-01
 
 ### Added

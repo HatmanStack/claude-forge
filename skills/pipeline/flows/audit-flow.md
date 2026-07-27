@@ -77,9 +77,9 @@ The planner reads ALL intake docs and creates ONE unified plan.
 
 ### 1a: Spawn Planner
 
-**Agent addressing:** All spawns follow the convention in `pipeline-protocol.md` — pass an explicit `name` at spawn as a human-readable label, then **capture the returned `agentId`** and use that captured id in every subsequent `SendMessage(to=...)`. The `name` is not a routable address once the Agent call returns. Phase tags (`[HYGIENIST]`, `[FORTIFIER]`, etc.) select the `subagent_type` but do not change the label: phase N is always labeled `implementer-phase-N` / `reviewer-phase-N`.
+**Agent addressing:** All spawns follow the convention in `pipeline-protocol.md` — pass an explicit `name` at spawn and address the agent by that same bare `name` in every subsequent `SendMessage(to=...)`. Names remain routable after an agent finishes; the composite `name@session-<hex>` id is rejected. Phase tags (`[HYGIENIST]`, `[FORTIFIER]`, etc.) select the `subagent_type` but do not change the label: phase N is always labeled `implementer-phase-N` / `reviewer-phase-N`.
 
-- Spawn an **Agent** with `subagent_type="forge:planner"`, `name="planner"` (label only), and **capture the returned `agentId`** for subsequent SendMessage calls:
+- Spawn an **Agent** with `subagent_type="forge:planner"`, `name="planner"`, reusing that name for subsequent SendMessage calls:
 
 ```text
 <task>
@@ -112,7 +112,7 @@ When complete, end with: PLAN_COMPLETE
 
 ### 1a (Re-entry): Spawn Planner After Re-Evaluation
 
-When looping back from Stage 3 (Verification) with unverified items, reuse the existing planner via `SendMessage(to=<captured planner agentId>, ...)` rather than spawning a new agent. If you no longer have the captured `agentId` (new session, missing scratch state), spawn a fresh planner with `subagent_type="forge:planner"`, `name="planner"` (label), and capture its new `agentId`:
+When looping back from Stage 3 (Verification) with unverified items, reuse the existing planner via `SendMessage(to="planner", ...)` rather than spawning a new agent. If the planner is gone (a session restart kills running agents), spawn a fresh planner with `subagent_type="forge:planner"` and `name="planner"`:
 
 ```text
 <task>
@@ -160,7 +160,7 @@ For each phase, read the phase title to determine the tag, then spawn the correc
 - Implementer: spawn subagent_type=forge:doc-engineer
 - Reviewer: spawn subagent_type=forge:doc-reviewer
 
-Agent spawn format is the same as main SKILL.md Stage 2, substituting the appropriate `subagent_type` per phase tag. Use `name="implementer-phase-N"` and `name="reviewer-phase-N"` as labels regardless of which `subagent_type` was spawned — the tag picks the `subagent_type`, not the label. **Capture the `agentId`** returned by each spawn and route every subsequent `SendMessage(to=...)` to that captured id, not to the name string.
+Agent spawn format is the same as main SKILL.md Stage 2, substituting the appropriate `subagent_type` per phase tag. Use `name="implementer-phase-N"` and `name="reviewer-phase-N"` as labels regardless of which `subagent_type` was spawned — the tag picks the `subagent_type`, not the label. Address each agent by the bare `name` you spawned it with in every subsequent `SendMessage(to=...)`.
 
 Loop until `PHASE_APPROVED` or max iterations per phase.
 
@@ -176,7 +176,7 @@ After all phases are `PHASE_APPROVED`, run a single verification agent that veri
 
 ### 3a: Spawn Verification Agent
 
-- Spawn **one Agent** with `subagent_type="forge:reviewer"`, `name="verification-reviewer"` (label only), and **capture the returned `agentId`** in case a re-entry SendMessage is needed:
+- Spawn **one Agent** with `subagent_type="forge:reviewer"`, `name="verification-reviewer"`, reusing that name if a re-entry SendMessage is needed:
 
 ```text
 <task>
