@@ -1,6 +1,7 @@
 ---
 name: brainstorm
-description: Interactively explore a codebase and refine a feature idea into a structured design spec through clarifying questions. Use when starting a new feature.
+description: Explore the codebase and turn a feature idea into a design spec (brainstorm.md) through clarifying questions; the entry point for /pipeline.
+disable-model-invocation: true
 ---
 
 # Feature Brainstorm

@@ -65,6 +65,8 @@ Without this flag, skills that spawn or communicate with sub-agents will fail.
 | `doc-health` | Documentation drift detection across 6 phases | `doc-audit.md` | `pipeline` |
 | `pipeline` | Automated build/remediation cycle, routes by intake doc type | Committed code | Done |
 
+Every skill is user-invoked (`disable-model-invocation: true`): Claude never starts a multi-agent run on its own, and the skill descriptions stay out of context in sessions that don't use Forge.
+
 ### Usage
 
 ```bash

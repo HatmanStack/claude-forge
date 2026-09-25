@@ -1,6 +1,7 @@
 ---
 name: repo-eval
-description: Evaluate a codebase across 12 pillars (hire, stress, day 2) using 3 parallel evaluator agents, then produce an eval doc for /pipeline remediation.
+description: Score the codebase on 12 pillars with a 3-evaluator hiring panel and write eval.md for /pipeline remediation.
+disable-model-invocation: true
 allowed-tools: Agent, Read, Write, Glob, Grep, Bash
 ---
 

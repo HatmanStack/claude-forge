@@ -1,6 +1,7 @@
 ---
 name: pipeline
-description: Run the adversarial plan-implement-review pipeline. Spawns agents for each role with their own context windows. Use after /brainstorm, /repo-eval, /repo-health, or /doc-health has produced a starting doc.
+description: Run the adversarial plan → implement → review pipeline on a plan directory produced by /brainstorm or an audit skill.
+disable-model-invocation: true
 allowed-tools: Agent, SendMessage, Read, Write, Glob, Grep, Bash, Edit
 ---
 

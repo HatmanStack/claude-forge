@@ -1,6 +1,7 @@
 ---
 name: repo-health
-description: Audit a codebase for technical debt across 4 vectors (architectural, structural, operational, hygiene), then produce an audit doc for /pipeline remediation.
+description: Audit technical debt across 4 vectors and write health-audit.md for /pipeline remediation.
+disable-model-invocation: true
 allowed-tools: Agent, Read, Write, Glob, Grep, Bash
 ---
 

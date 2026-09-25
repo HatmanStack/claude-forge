@@ -63,3 +63,14 @@ def test_trace_hook_imports_and_role_sets_match_registry():
     assert mod._REVIEWER_ROLES == registry.REVIEWER_ROLES
     assert mod._ASSESSOR_ROLES == registry.ASSESSOR_ROLES
     assert mod._ADVANCE_EMITTERS == registry.ADVANCE_EMITTERS
+
+
+def test_skills_are_user_invoked():
+    """Every skill spawns agents and writes files, and is only ever run by hand.
+    Model-invocable skills would put their descriptions in every session's
+    context and let the model start a multi-agent run on its own."""
+    for skill in sorted((registry.REPO_ROOT / "skills").glob("*/SKILL.md")):
+        fm = registry.parse_frontmatter(skill.read_text())
+        assert str(fm.get("disable-model-invocation")).lower() == "true", (
+            f"{skill.parent.name} must set disable-model-invocation: true"
+        )

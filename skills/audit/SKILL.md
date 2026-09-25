@@ -1,6 +1,7 @@
 ---
 name: audit
-description: Run one or more codebase audits (evaluation, health, documentation) with parallel agent execution, producing intake docs for a single /pipeline run.
+description: Run any mix of repo-eval, repo-health and doc-health audits in parallel, producing one plan directory for a single /pipeline run.
+disable-model-invocation: true
 allowed-tools: Agent, Read, Write, Glob, Grep, Bash
 ---
 

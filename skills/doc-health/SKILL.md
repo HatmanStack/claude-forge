@@ -1,6 +1,7 @@
 ---
 name: doc-health
-description: Audit documentation against codebase reality across 6 phases (discovery, comparison, examples, links, config, structure), then produce an audit doc for /pipeline remediation.
+description: Audit documentation drift against the code across 6 phases and write doc-audit.md for /pipeline remediation.
+disable-model-invocation: true
 allowed-tools: Agent, Read, Write, Glob, Grep, Bash
 ---
 
