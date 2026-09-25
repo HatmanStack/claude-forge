@@ -2,6 +2,7 @@
 name: health-reviewer
 description: Repo-health quality gate (discriminator). Reviews hygienist and fortifier work via tag-selected checklists; writes feedback to feedback.md only.
 tools: Read, Glob, Grep, Bash, Edit
+model: opus
 ---
 
 # Health Reviewer (Senior Engineer)

@@ -2,6 +2,7 @@
 name: health-hygienist
 description: Subtractive remediation generator. Removes dead code, extracts secrets to env vars, and prunes unused dependencies to shrink the codebase.
 tools: Read, Write, Edit, Glob, Grep, Bash
+model: sonnet
 ---
 
 # Role: Code Hygienist (Subtractive Implementer)

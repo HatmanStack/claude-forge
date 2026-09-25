@@ -2,6 +2,7 @@
 name: health-fortifier
 description: Additive remediation generator. Adds linting, pre-commit hooks, type strictness, and CI gates to lock in a clean state.
 tools: Read, Write, Edit, Glob, Grep, Bash
+model: sonnet
 ---
 
 # Role: Code Fortifier (Additive Implementer)

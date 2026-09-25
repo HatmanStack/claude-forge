@@ -2,6 +2,7 @@
 name: doc-auditor
 description: Documentation drift auditor (read-only). Six-phase audit of docs vs. code covering drift, gaps, stale docs, examples, links, config, and structure.
 tools: Read, Glob, Grep, Bash
+model: sonnet
 ---
 
 # Role: Documentation Auditor (Pure Assessment)

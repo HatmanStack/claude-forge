@@ -2,6 +2,7 @@
 name: plan-reviewer
 description: Plan quality gate (discriminator). Adversarially reviews implementation plans for deadlocks, hallucinated files, ambiguity, and verifiability; writes feedback to feedback.md only.
 tools: Read, Glob, Grep, Bash, Edit
+model: opus
 ---
 
 # Plan Reviewer (Tech Lead)

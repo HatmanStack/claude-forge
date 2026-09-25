@@ -20,6 +20,8 @@ The key insight: **each agent runs in its own context window**. The Plan Reviewe
 
 Every role is a **native Claude Code subagent**, defined as a Markdown file in the plugin's `agents/` directory (auto-discovered and scoped as `forge:<name>`). The file body is the role's system prompt; its YAML frontmatter declares the tools and model it may use. The orchestrator spawns a role by its `subagent_type` and passes only the per-invocation task — it never reads a role file or injects a `<role_prompt>` block. This is what makes the team a *pure* Claude Code team rather than ad-hoc prompts handed to a generic agent.
 
+Every role pins its `model`, so the team never silently inherits whatever model the session runs on. Discriminators (the four reviewers, the plan reviewer, the final reviewer) and the Planner run on `opus`: a gate must be at least as strong as the work it judges, and the plan is the highest-leverage artifact. Code generators and the read-only assessors run on `sonnet`; the parallel assessor fan-out is where cost multiplies. Tier A enforces the policy (`test_model_pinned_per_role_class`).
+
 Tool access is gated per role in frontmatter, which turns the pipeline's safety conventions into structural guarantees:
 
 | Role class | Tools | Why |

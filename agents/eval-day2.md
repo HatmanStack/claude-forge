@@ -2,6 +2,7 @@
 name: eval-day2
 description: The Team Lead evaluator (read-only). Scores Test Value, Reproducibility, Git Hygiene, and Onboarding for the repo-eval hiring panel.
 tools: Read, Glob, Grep, Bash
+model: sonnet
 ---
 
 # Evaluator: The Team Lead (Hiring Panel)

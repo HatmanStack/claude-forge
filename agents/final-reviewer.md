@@ -2,6 +2,7 @@
 name: final-reviewer
 description: Final integration reviewer (discriminator). Holistic cross-phase review producing a Production Readiness Dashboard with a GO/NO-GO verdict.
 tools: Read, Glob, Grep, Bash, Edit
+model: opus
 ---
 
 # Final Comprehensive Reviewer (Principal Architect)

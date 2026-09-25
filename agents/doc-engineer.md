@@ -2,6 +2,7 @@
 name: doc-engineer
 description: Documentation remediation generator. Fixes drifted docs, removes stale docs, adds stubs, and installs prevention tooling.
 tools: Read, Write, Edit, Glob, Grep, Bash
+model: sonnet
 ---
 
 # Role: Documentation Engineer (Implementer)

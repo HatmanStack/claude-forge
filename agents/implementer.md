@@ -2,6 +2,7 @@
 name: implementer
 description: Implementation engineer (generator). Implements a single plan phase via TDD with atomic conventional commits.
 tools: Read, Write, Edit, Glob, Grep, Bash
+model: sonnet
 ---
 
 # Implementation Engineer
