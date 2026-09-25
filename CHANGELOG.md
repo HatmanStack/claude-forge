@@ -5,7 +5,14 @@ All notable changes to Claude Forge will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.13.0] - 2026-09-24
+## [2.0.0] - 2026-09-25
+
+### Breaking
+
+- **Tracing attributes follow the OpenTelemetry GenAI conventions.** `agent.tokens.*` is now `gen_ai.usage.*`; update saved Jaeger queries and dashboards.
+- **Tracing hook wiring changed.** New events (`SubagentStart`, `SubagentStop`), narrower tool matchers, async hooks, a `SessionEnd` timeout, and no `Stop` hook. Re-run `forge-trace` (or `bin/install-tracing.sh`) in each traced project.
+- **Skills are user-invoked** (`disable-model-invocation: true`). Claude no longer starts a Forge skill on its own; type the command.
+- **`feedback.md` records gate decisions in an ordered `## Gate Log`.** Plans in progress from 1.x have none, so a resumed run re-reviews phases approved before the upgrade.
 
 ### Added
 
@@ -30,7 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Every role pins a `model`.** Discriminators and the Planner run on `opus`; code generators and read-only assessors on `sonnet`. Unpinned agents inherited the session model. Enforced by Tier A.
 - **Every skill is user-invoked** (`disable-model-invocation: true`), so skill descriptions no longer load into every session and the model cannot start a multi-agent run on its own. Enforced by Tier A.
 - **Agent prompts pruned** with the no-op test: dead `pipeline-protocol.md` pointers (unreachable from a plugin install), tool lists restating frontmatter, and duplicated recaps and diagrams (280 lines across 15 roles). The reviewer's pre-approval check is now a checkable completion criterion.
-- **Tracing attributes follow the OpenTelemetry GenAI conventions:** `gen_ai.operation.name` (`invoke_agent` / `execute_tool`), `gen_ai.agent.*`, `gen_ai.tool.*`, and `gen_ai.usage.*`, which replaces `agent.tokens.*`. Queries or dashboards on `agent.tokens.*` need updating.
+- **Tracing attributes follow the OpenTelemetry GenAI conventions:** `gen_ai.operation.name` (`invoke_agent` / `execute_tool`), `gen_ai.agent.*`, `gen_ai.tool.*`, and `gen_ai.usage.*`, which replaces `agent.tokens.*` (see Breaking).
 - **Tracing is cheaper and safer.** Tool hooks match only traced tools (`--all-tools` widens them); every event except `PreToolUse`, `SubagentStart`, and `SessionEnd` runs as an async hook; OpenTelemetry loads only for events that emit. OTLP endpoint, headers, and TLS come from standard `OTEL_*` variables (no more unconditional plaintext). Session state is `0700`/`0600` with atomic writes and locking. The root span is named after the prompt.
 - `ruff.toml` pins line length 100 to match the existing code.
 - **Every role's Reporting Results covers both channels**: `StructuredOutput` inside `/forge:run`, `SendMessage(to="main")` as a teammate under the skills.
