@@ -116,3 +116,16 @@ def test_session_end_hook_gets_time_to_finish():
     (entry,) = example["hooks"]["SessionEnd"]
     assert entry["hooks"][0].get("timeout", 0) >= 5
     assert '"timeout"] = 10' in (registry.REPO_ROOT / "bin" / "install-tracing.sh").read_text()
+
+
+def test_feedback_template_records_no_decisions():
+    """Flows create a missing feedback.md from the protocol's template; a gate
+    decision in it would make a fresh plan look already approved."""
+    import re
+
+    text = (registry.REPO_ROOT / "skills" / "pipeline" / "pipeline-protocol.md").read_text()
+    section = text.split("### feedback.md Template", 1)[1].split("\n### ", 1)[0]
+    (template,) = re.findall(r"```markdown\n(.*?)```", section, re.S)
+    assert "## Gate Log" in template
+    decisions = r"(?m)^(PLAN_APPROVED|PHASE_APPROVED|GO|NO-GO|VERIFIED|UNVERIFIED|REWORK)\b"
+    assert not re.search(decisions, template)

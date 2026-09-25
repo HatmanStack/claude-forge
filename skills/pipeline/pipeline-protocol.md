@@ -123,14 +123,30 @@ Consequences for the `/forge:pipeline` orchestrator:
 
 All review feedback lives in `docs/plans/<plan_id>/feedback.md`. Plan documents are **never mutated** by reviewers.
 
-### feedback.md Structure
+### feedback.md Template
+
+Create a missing `feedback.md` from this template, exactly. Its Gate Log starts empty: any line in it is a recorded decision.
 
 ```markdown
 # Feedback Log
 
 ## Active Feedback
 
-### [PLAN_REVIEW | CODE_REVIEW] - Iteration N - Phase X, Task Y
+## Resolved Feedback
+
+## Gate Log
+```
+
+### Example: a populated feedback.md
+
+Not a template; copying it would record decisions that were never made.
+
+```markdown
+# Feedback Log
+
+## Active Feedback
+
+### CODE_REVIEW - Iteration 1 - Phase 2, Task 3
 
 > **Consider:** ...
 > **Think about:** ...
@@ -142,7 +158,7 @@ All review feedback lives in `docs/plans/<plan_id>/feedback.md`. Plan documents 
 
 ## Resolved Feedback
 
-### [PLAN_REVIEW | CODE_REVIEW] - Iteration N - Phase X, Task Y
+### PLAN_REVIEW - Iteration 1 - Phase 1, Task 2
 
 > **Consider:** ...
 
@@ -159,7 +175,8 @@ All review feedback lives in `docs/plans/<plan_id>/feedback.md`. Plan documents 
 
 PLAN_APPROVED
 PHASE_APPROVED — Phase 1
-VERIFIED
+UNVERIFIED
+REWORK
 ```
 
 ### Rules
@@ -170,6 +187,7 @@ VERIFIED
 - Reference specific files, line numbers, and test names
 - Use rhetorical questions (Consider / Think about / Reflect) -- don't provide answers
 - **Gates log decisions.** `## Gate Log` is an ordered, append-only log, one decision per line: the Plan Reviewer logs `PLAN_APPROVED`, a phase reviewer `PHASE_APPROVED — Phase N`, the Final Reviewer `GO` or `NO-GO`, the verifier `VERIFIED` or `UNVERIFIED` (listing unverified findings under `## Verification`). A rework begins by logging `REWORK`
+- **Rework adds phases; it never reopens one.** After a NO-GO or UNVERIFIED, rework starts by logging `REWORK`. The Planner fixes plan-level issues in the existing phase files and adds new Phase-N files for implementation fixes; the Plan Reviewer approves the revised plan; only the new phases are implemented and reviewed. Approved phases stay approved, so the log stays append-only and every line in it stays true
 - **Resume reads the log in order.** The current verdict is the last `GO`/`NO-GO`/`VERIFIED`/`UNVERIFIED` line unless a `REWORK` line follows it; the plan is approved only if a `PLAN_APPROVED` line follows the last `REWORK`; a phase is done when its `PHASE_APPROVED — Phase N` line is present. A decision that isn't logged is made again
 
 ## File Ownership

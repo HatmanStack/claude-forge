@@ -338,12 +338,12 @@ B) Review feedback manually: read docs/plans/$ARGUMENTS/feedback.md
 C) Ship with caveats (if issues are minor)
 ```
 
-**NO-GO Re-Entry Path:** When the user re-runs `/pipeline $ARGUMENTS` after a NO-GO, the State Recovery (Stage 0) detects the `NO-GO` in feedback.md and routes rework based on the final reviewer's categorization:
-- **Plan-level issues** (architecture flaw, missing phase): Re-enter at Stage 1 (Planner) with revision instructions referencing the `FINAL_REVIEW` feedback
-- **Implementation-level issues** (bug, missing test, security): Re-enter at Stage 2 at the affected phase(s), spawning the Implementer with `FINAL_REVIEW` feedback items as `CODE_REVIEW` rework
-- **Mixed issues**: Plan-level first, then implementation-level
+**NO-GO Re-Entry Path:** When the user re-runs `/pipeline $ARGUMENTS` after a NO-GO, State Recovery (Stage 0) finds the `NO-GO` in the Gate Log. Rework adds phases; it never reopens an approved one:
 
-When rework starts, the orchestrator appends `REWORK` under `## Gate Log`, so an interrupted run resumes the rework rather than reporting the old NO-GO, and waits for the reworked plan's own `PLAN_APPROVED`.
+1. Append `REWORK` under `## Gate Log` before anything else, so an interrupted run resumes the rework instead of reporting the old NO-GO.
+2. Re-enter Stage 1: the Planner reads the `FINAL_REVIEW` items, fixes **plan-level** issues (architecture flaw, missing phase) in the existing phase files, and adds new Phase-N files, numbered after the last one, for **implementation-level** issues (bug, missing test, security). It moves each `FINAL_REVIEW` item to Resolved Feedback, naming the phase that addresses it.
+3. The Plan Reviewer reviews the revised plan; its `PLAN_APPROVED` after the `REWORK` line approves it.
+4. Stage 2 runs only the new phases; phases approved before the rework stay approved. Then Stage 3 as usual.
 
 ### On Max Iterations Reached
 

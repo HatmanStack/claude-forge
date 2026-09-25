@@ -202,12 +202,11 @@ Every gate decision is one line in an ordered `## Gate Log` in `feedback.md` (`P
 
 ## NO-GO Rollback
 
-When the feature pipeline's final reviewer issues NO-GO, it records the issues as `FINAL_REVIEW` feedback, categorized:
-- **Plan-level issues** → re-enter at Planner with revision instructions
-- **Implementation-level issues** → re-enter at the affected phase's Implementer
-- **Mixed** → plan-level first, then implementation
+When the feature pipeline's final reviewer issues NO-GO, it records the issues as `FINAL_REVIEW` feedback, categorized as plan-level (architecture flaw, missing phase) or implementation-level (bug, missing test, security), and logs `NO-GO`.
 
-Neither runner retries on its own. `/forge:pipeline` routes the rework when you re-run it; `/forge:run` stops at a recorded NO-GO (or UNVERIFIED) until you run `/forge:run <plan-id> rework`, which re-plans from the recorded issues, adds phases for the implementation work, and runs the remaining gates.
+Rework adds phases; it never reopens one. It starts by logging `REWORK`. The Planner fixes plan-level issues in the existing phase files and adds new phases for implementation-level fixes; the Plan Reviewer approves the revised plan; only the new phases are implemented and reviewed, then the final gate runs again. Phases approved before the rework stay approved, so the Gate Log stays append-only: no approval ever has to be withdrawn, and an interrupted rework resumes from the log like any other run.
+
+Neither runner retries on its own. `/forge:pipeline` starts the rework when you re-run it after a NO-GO; `/forge:run` stops at a recorded NO-GO (or UNVERIFIED) until you run `/forge:run <plan-id> rework`.
 
 ## Plan Versioning
 
