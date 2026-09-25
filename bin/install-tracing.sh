@@ -160,6 +160,11 @@ def entry(event):
     h = {"type": "command", "command": cmd}
     if event not in SYNC:
         h["async"] = True
+    if event == "SessionEnd":
+        # Claude Code allows SessionEnd hooks 1.5 s unless the hook sets a
+        # timeout; the session summary (usage totals, security pass, export)
+        # needs longer.
+        h["timeout"] = 10
     e = {"hooks": [h]}
     if event in TOOL_EVENTS:
         e["matcher"] = matcher

@@ -206,7 +206,8 @@ _INJECTION_PATTERNS = [
     r"disregard\s+(?:your|the|all)\s+(?:instruction|system\s+prompt|guideline)",
     r"\byou\s+are\s+now\s+(?:a|an|the)\b",
     r"\bnew\s+instructions?\s*:",
-    r"</?(?:system|instructions|prompt)\b",
+    # Not <system-reminder>: Claude Code injects those into tool results itself.
+    r"</?(?:system(?!-reminder)|instructions|prompt)\b",
     r"(?:record|cast|set|change)\s+your\s+(?:vote|verdict|decision)",
     r"\bemit\s+(?:PHASE_APPROVED|PLAN_APPROVED|GO|VERIFIED)\b",
 ]

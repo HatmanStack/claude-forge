@@ -81,7 +81,7 @@ returns scripted reports, and asserts on the sequence of roles it spawns:
 - phase tags routing to their implementer/reviewer pair, and each flow's default pair
 - the unified audit re-planning significant unverified findings exactly once
 - a recorded verdict stopping the run unless `rework` is passed
-- every agent pinning a non-Fable model, and every exit recorded in `skill-runs.json`
+- every agent pinning a non-Fable model, and no agent asked to write under `.claude/`
 
 ## Tier D — hook replay
 

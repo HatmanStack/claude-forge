@@ -48,7 +48,7 @@ The same stages, roles, and plan files run under two orchestrators. They differ 
 
 Moving the orchestration into code removes a class of failures rather than guarding against them. A skill orchestrator can misread a signal, skip a gate, or lose count of iterations. In the workflow, the verdict is a schema field the script branches on, and a gate that didn't run can't produce one. The cost is continuity: a workflow agent is one-shot, so a reviewer re-reads Phase-0 and the phase spec every iteration instead of remembering them. Pipeline state already lives in files, so that costs tokens, not correctness.
 
-Before planning, `/forge:run` spends one cheap read-only agent reporting the plan's state (which the script cannot read itself), and it ends with a Haiku agent that records the run in `.claude/skill-runs.json`. Every role agent is spawned with the model its frontmatter pins; a Tier A contract keeps the script's pins equal to the frontmatter, and a Tier C suite runs the script against scripted replies to check gate order, loop limits, resume entry points, and phase routing.
+Before planning, `/forge:run` spends one cheap read-only agent reporting the plan's state (which the script cannot read itself). It writes nothing under `.claude/`: Claude Code protects that directory, and a background agent can't ask for permission. The run's durable record is the plan directory (`## Approvals` and `## Verification` in `feedback.md`) and the verdict it returns. Every role agent is spawned with the model its frontmatter pins; a Tier A contract keeps the script's pins equal to the frontmatter, and a Tier C suite runs the script against scripted replies to check gate order, loop limits, resume entry points, and phase routing.
 
 ## Signal Protocol
 
@@ -233,10 +233,9 @@ Each entry varies by skill type:
 {"skill": "audit", "date": "2026-03-15", "plan": "2026-03-15-audit-slug", "audits": ["health", "eval", "docs"]}
 {"skill": "repo-eval", "date": "2026-03-15", "plan": "2026-03-15-eval-slug"}
 {"skill": "pipeline", "date": "2026-03-15", "plan": "2026-03-15-eval-slug", "type": "repo-eval", "verdict": "VERIFIED"}
-{"skill": "run", "date": "2026-03-16", "plan": "2026-03-12-payment-webhooks", "flow": "feature", "verdict": "GO"}
 ```
 
-The `pipeline` and `run` entries include the detected flow and the final verdict. The `audit` entry records which audit types were selected. If the file is malformed, the skill overwrites it with a fresh array containing only the new entry.
+The `pipeline` entry includes the detected pipeline type and final verdict. `/forge:run` does not write this file (see *Two Runners*); its record is the plan directory. The `audit` entry records which audit types were selected. If the file is malformed, the skill overwrites it with a fresh array containing only the new entry.
 
 This log survives OS wipes (it lives in the repo, not a local config directory) and lets users track skill usage across projects over time.
 

@@ -387,16 +387,7 @@ async function runPhases(phases, statusOf) {
   return { ok: true }
 }
 
-// Every exit records the run in .claude/skill-runs.json, as the skills do.
-async function finish(result) {
-  await agent(`Append this entry to the JSON array in .claude/skill-runs.json at the repo root, creating the file as [] if it is missing and replacing it with a fresh array if it is not valid JSON. Use today's date. Change nothing else.
-
-{"skill": "run", "date": "<today, YYYY-MM-DD>", "plan": "${PLAN}", "flow": "${FLOW}", "verdict": "${result.verdict}"}`,
-    { label: 'record-run', model: 'haiku', effort: 'low' })
-  return result
-}
-
-const stopped = (why) => finish({ verdict: 'MAX_ITERATIONS', flow: FLOW, message: `Pipeline paused: ${why}. Unresolved items are in ${DIR}/feedback.md.`, history })
+const stopped = (why) => ({ verdict: 'MAX_ITERATIONS', flow: FLOW, message: `Pipeline paused: ${why}. Unresolved items are in ${DIR}/feedback.md.`, history })
 
 // ---------------------------------------------------------------------------
 // repo-eval: calibrate the three evaluators' scores before planning.
@@ -469,7 +460,7 @@ If ready: record GO in feedback.md and signal GO.
 If not ready: write feedback to ${DIR}/feedback.md tagged FINAL_REVIEW, categorize issues as plan-level or implementation-level, and signal NO-GO.`), FINAL_REPORT, { label: 'final-reviewer', phase: 'Final gate' })
   if (!f) return { verdict: 'ERROR', flow: FLOW, message: 'Final reviewer failed', history }
   history.push(`final review: ${f.signal}`)
-  return finish({
+  return ({
     verdict: f.signal, flow: FLOW, summary: f.summary, history,
     planLevelIssues: f.planLevelIssues, implementationLevelIssues: f.implementationLevelIssues,
     next: f.signal === 'GO' ? 'Production ready.' : `Address the issues or run /forge:run ${PLAN} rework.`,
@@ -486,7 +477,7 @@ Record the result in ${DIR}/feedback.md under a "## Verification" heading (add i
   history.push(`verification ${cycle}: ${v.signal}`)
   const loopBack = FLOW === 'audit' && v.signal === 'UNVERIFIED' && v.unverified.length >= 3 && cycle < MAX_VERIFY_CYCLES
   if (!loopBack) {
-    return finish({
+    return ({
       verdict: v.signal, flow: FLOW, summary: v.summary, unverified: v.unverified, history,
       next: v.signal === 'VERIFIED' ? 'All remediation is committed and verified.'
         : `Review the unverified items, then run /forge:run ${PLAN} rework, or accept as-is.`,

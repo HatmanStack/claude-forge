@@ -2,7 +2,9 @@
 //
 // Runs the workflow script with scripted agent() replies (no model calls) and
 // asserts on the sequence of roles it spawns: gate order, loop limits, resume
-// entry points, tag routing, and that every agent pins a model.
+// entry points, tag routing, and that every agent pins a model. The workflow
+// never writes under .claude/: a background agent can't, so the run's record
+// is feedback.md plus the verdict it returns.
 //
 //   node --test evaluation/tier_c_trajectory/workflow_run.test.mjs
 
@@ -24,14 +26,12 @@ const TWO_PHASES = [{ n: 1, title: 'Phase 1', tag: 'NONE' }, { n: 2, title: 'Pha
 // replies: role name -> array of signals (or reply objects), consumed in order.
 async function run({ state = {}, replies = {}, args = '2026-01-01-demo' } = {}) {
   const calls = []
-  const records = []
   const queues = Object.fromEntries(Object.entries(replies).map(([k, v]) => [k, [...v]]))
   const agent = async (prompt, opts = {}) => {
     const name = (opts.agentType || opts.label || '').replace(/^forge:/, '')
     calls.push({ name, model: opts.model, agentType: opts.agentType, label: opts.label, prompt })
     if (opts.label === 'recover-state') return { ...STATE, ...state }
     if (opts.label === 'calibrate-eval') return 'calibrated'
-    if (opts.label === 'record-run') { records.push(prompt); return 'recorded' }
     const q = queues[name]
     if (!q || !q.length) throw new Error(`unscripted call to ${name} (${opts.label})`)
     const r = q.shift()
@@ -39,8 +39,8 @@ async function run({ state = {}, replies = {}, args = '2026-01-01-demo' } = {}) 
     return { summary: `${name} report`, phases: TWO_PHASES, planLevelIssues: [], implementationLevelIssues: [], unverified: [], ...reply }
   }
   const result = await script(agent, () => {}, () => {}, args)
-  const roles = calls.map(c => c.name).filter(n => !['recover-state', 'record-run'].includes(n))
-  return { result, calls, roles, records }
+  const roles = calls.map(c => c.name).filter(n => n !== 'recover-state')
+  return { result, calls, roles }
 }
 
 test('feature flow: plan revision, phase rework, final GO', async () => {
@@ -261,23 +261,6 @@ test('no intake doc is an error, not a plan', async () => {
   assert.deepEqual(roles, [])
 })
 
-test('every run that reaches a verdict records it once in skill-runs.json', async () => {
-  const done = await run({
-    replies: {
-      planner: ['PLAN_COMPLETE'], 'plan-reviewer': ['PLAN_APPROVED'],
-      implementer: Array(2).fill('IMPLEMENTATION_COMPLETE'), reviewer: Array(2).fill('PHASE_APPROVED'),
-      'final-reviewer': ['NO-GO'],
-    },
-  })
-  assert.equal(done.records.length, 1)
-  assert.match(done.records[0], /"verdict": "NO-GO"/)
-  const paused = await run({ replies: { planner: Array(3).fill('PLAN_COMPLETE'), 'plan-reviewer': Array(3).fill('REVISION_REQUIRED') } })
-  assert.equal(paused.records.length, 1)
-  assert.match(paused.records[0], /MAX_ITERATIONS/)
-  const noop = await run({ state: { finalVerdict: 'GO' } })
-  assert.equal(noop.records.length, 0)
-})
-
 test('slash-command text carries the plan id and flags', async () => {
   const rework = await run({
     args: '2026-01-01-demo rework',
@@ -296,5 +279,16 @@ test('slash-command text carries the plan id and flags', async () => {
     replies: { implementer: ['IMPLEMENTATION_COMPLETE'], reviewer: ['PHASE_APPROVED'], 'final-reviewer': ['GO'] },
   })
   assert.ok(standalone.calls.filter(c => c.agentType).every(c => !c.agentType.startsWith('forge:')))
+})
+
+test('no agent is asked to write under .claude/', async () => {
+  const { calls } = await run({
+    replies: {
+      planner: ['PLAN_COMPLETE'], 'plan-reviewer': ['PLAN_APPROVED'],
+      implementer: Array(2).fill('IMPLEMENTATION_COMPLETE'), reviewer: Array(2).fill('PHASE_APPROVED'),
+      'final-reviewer': ['GO'],
+    },
+  })
+  for (const c of calls) assert.doesNotMatch(c.prompt, /\.claude\//, c.label)
 })
 

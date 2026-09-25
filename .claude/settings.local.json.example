@@ -150,7 +150,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 ${CLAUDE_PROJECT_DIR}/hooks/trace_subagents.py"
+            "command": "python3 ${CLAUDE_PROJECT_DIR}/hooks/trace_subagents.py",
+            "timeout": 10
           }
         ]
       }
