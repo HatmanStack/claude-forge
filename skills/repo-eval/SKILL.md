@@ -65,7 +65,7 @@ B) Full repo, no exclusions
 C) Specific directories only (tell me which to include or exclude)
 ```
 
-**Question 5** — Pillar overrides. By default, the pipeline remediates until all 12 pillars hit 9/10. Some pillars may not be improvable through code changes. The 12 pillars are:
+**Question 5** — Pillar overrides. By default, every pillar scoring below 9/10 gets remediation targets. The pipeline plans and implements fixes for those targets, then verifies each target was addressed; it does not re-run the evaluators, so it confirms the targets, not new scores. Some pillars may not be improvable through code changes. The 12 pillars are:
 - **Hire lens:** Problem-Solution Fit, Architecture, Code Quality, Creativity
 - **Stress lens:** Pragmatism, Defensiveness, Performance, Type Rigor
 - **Day 2 lens:** Test Value, Reproducibility, Git Hygiene, Onboarding
@@ -220,7 +220,7 @@ Evaluation complete: docs/plans/YYYY-MM-DD-eval-slug/eval.md
 Scores: [N]/12 pillars at target (≥9)
 Lowest: [pillar] at [X]/10
 
-To remediate and bring all pillars to 9/10, run:
+To remediate the pillars below target, run:
 /forge:run YYYY-MM-DD-eval-slug
 
 (Standalone install: /run YYYY-MM-DD-eval-slug. To orchestrate in this session instead: /forge:pipeline YYYY-MM-DD-eval-slug.)

@@ -292,3 +292,44 @@ test('no agent is asked to write under .claude/', async () => {
   for (const c of calls) assert.doesNotMatch(c.prompt, /\.claude\//, c.label)
 })
 
+
+test('open plan-review items resume the planner with the revision task, never the creation task', async () => {
+  const { calls, roles } = await run({
+    state: { planFilesExist: true, openPlanReview: true, phases: TWO_PHASES },
+    replies: {
+      planner: ['PLAN_COMPLETE'], 'plan-reviewer': ['PLAN_APPROVED'],
+      implementer: Array(2).fill('IMPLEMENTATION_COMPLETE'), reviewer: Array(2).fill('PHASE_APPROVED'),
+      'final-reviewer': ['GO'],
+    },
+  })
+  assert.equal(roles[0], 'planner')
+  const first = calls.find(c => c.name === 'planner').prompt
+  assert.match(first, /requested revisions/)
+  assert.doesNotMatch(first, /Brainstorm document|create the implementation plan/)
+})
+
+test('rework and audit re-plans record a marker so a paused run resumes instead of re-planning', async () => {
+  const nogo = await run({
+    args: '2026-01-01-demo rework',
+    state: { finalVerdict: 'NO-GO', planFilesExist: true, planApproved: true, phases: [{ n: 1, title: 'x', tag: 'NONE' }],
+      phaseStatus: [{ n: 1, status: 'approved' }] },
+    replies: {
+      planner: [{ signal: 'PLAN_COMPLETE', phases: [{ n: 1, title: 'x', tag: 'NONE' }] }],
+      'plan-reviewer': ['PLAN_APPROVED'], 'final-reviewer': ['GO'],
+    },
+  })
+  assert.match(nogo.calls.find(c => c.name === 'planner').prompt, /FINAL_REVIEW item to "Resolved Feedback"/)
+  const unverified = await run({
+    args: '2026-01-01-demo rework',
+    state: { intakeDocs: ['health-audit.md'], finalVerdict: 'UNVERIFIED', planFilesExist: true, planApproved: true,
+      phases: [{ n: 1, title: 'x', tag: 'NONE' }], phaseStatus: [{ n: 1, status: 'approved' }] },
+    replies: {
+      planner: [{ signal: 'PLAN_COMPLETE', phases: [{ n: 1, title: 'x', tag: 'NONE' }] }],
+      'plan-reviewer': ['PLAN_APPROVED'], reviewer: ['VERIFIED'],
+    },
+  })
+  assert.match(unverified.calls.find(c => c.name === 'planner').prompt, /REPLANNED under "## Verification"/)
+  const recover = nogo.calls.find(c => c.label === 'recover-state').prompt
+  assert.match(recover, /REPLANNED/)
+  assert.match(recover, /no PLAN_REVIEW item is OPEN/)
+})

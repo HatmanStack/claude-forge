@@ -88,7 +88,7 @@ B) Full repo, no exclusions
 C) Specific directories only (tell me which to include or exclude)
 ```
 
-1. Pillar overrides — by default, the pipeline remediates until all 12 pillars hit 9/10. Some pillars (like Creativity) may not be improvable through code changes. Override lets you set a lower threshold or exclude a pillar from the remediation gate entirely.
+1. Pillar overrides — by default, every pillar below 9/10 gets remediation targets, and the pipeline verifies those targets were addressed (it does not re-score). Some pillars (like Creativity) may not be improvable through code changes. Override lets you set a lower threshold or exclude a pillar from the remediation gate entirely.
 
 The 12 pillars are:
 - **Hire lens:** Problem-Solution Fit, Architecture, Code Quality, Creativity

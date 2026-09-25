@@ -249,14 +249,31 @@ def test_assessor_casting_a_gate_signal_is_flagged(hook, tmp_path):
     assert {"role": "eval-hire", "signal": "PHASE_APPROVED"} in summary["events"]
 
 
-def test_session_completes_only_when_no_background_work(hook, tmp_path):
+def test_session_completes_at_session_end_covering_every_turn(hook, tmp_path):
     _run_parallel_intake(hook, tmp_path)
     hook(hook_event_name="Stop", background_tasks=[{"id": "a1", "type": "subagent"}])
-    assert not _by_name(hook.spans(), "session_complete")
     hook(hook_event_name="Stop", background_tasks=[])
+    assert not _by_name(hook.spans(), "session_complete")  # Stop never ends a session
     hook(hook_event_name="SessionEnd")
-    assert len(_by_name(hook.spans(), "session_complete")) == 1
+    (done,) = _by_name(hook.spans(), "session_complete")
+    assert done.status.is_ok
 
+
+def test_a_failed_turn_marks_the_session_error(hook, tmp_path):
+    _run_parallel_intake(hook, tmp_path)
+    hook(hook_event_name="StopFailure")
+    hook(hook_event_name="SessionEnd")
+    (done,) = _by_name(hook.spans(), "session_complete")
+    assert not done.status.is_ok
+
+
+def test_a_resumed_session_completes_again(hook, tmp_path):
+    _run_parallel_intake(hook, tmp_path)
+    hook(hook_event_name="SessionEnd")
+    hook(hook_event_name="UserPromptSubmit", prompt="continue")
+    hook(hook_event_name="SessionEnd")
+    hook(hook_event_name="SessionEnd")
+    assert len(_by_name(hook.spans(), "session_complete")) == 2
 
 def test_session_state_is_private(hook, tmp_path):
     _run_parallel_intake(hook, tmp_path)

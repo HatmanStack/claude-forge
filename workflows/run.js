@@ -117,10 +117,10 @@ const state = await agent(
 - intakeDocs: which of brainstorm.md, eval.md, health-audit.md, doc-audit.md exist in ${DIR}/.
 - planFilesExist / phases: Phase-0.md exists; then every Phase-N.md with N >= 1, its title (first heading) and the tag in the title ([IMPLEMENTER], [HYGIENIST], [FORTIFIER], [DOC-ENGINEER], else NONE).
 - From ${DIR}/feedback.md (absent means nothing recorded):
-  - planApproved: PLAN_APPROVED appears under "## Approvals".
+  - planApproved: PLAN_APPROVED appears under "## Approvals" and no PLAN_REVIEW item is OPEN (a later revision awaiting review is not approved).
   - openPlanReview: an item tagged PLAN_REVIEW has "**Status:** OPEN".
   - phaseStatus, per phase: "approved" if "PHASE_APPROVED — Phase N" is under "## Approvals"; else "needs-fixes" if a CODE_REVIEW item for Phase N is OPEN; else "needs-review" if CODE_REVIEW items for Phase N are all resolved, or \`git log --oneline\` shows commits for phase N but it has no review entries; else "not-started".
-  - finalVerdict: the most recent of GO (under "## Approvals"), NO-GO (a FINAL_REVIEW entry), VERIFIED or UNVERIFIED (under "## Verification"); NONE if none is recorded.
+  - finalVerdict: GO if GO is under "## Approvals"; else NO-GO if any FINAL_REVIEW item is OPEN; else the last line of "## Verification" if it is VERIFIED or UNVERIFIED; else NONE. (Rework resolves FINAL_REVIEW items and appends REPLANNED under "## Verification", which clears the old verdict.)
 - evalCalibrated: eval.md exists and has a "## Calibration" section.`,
   { label: 'recover-state', model: 'sonnet', effort: 'low', schema: STATE },
 )
@@ -292,6 +292,9 @@ const FINAL_REPORT = report(['GO', 'NO-GO'], {
 const VERIFY_REPORT = report(['VERIFIED', 'UNVERIFIED'], { unverified: { type: 'array', items: { type: 'string' } } })
 
 const history = []  // one line per gate decision, returned with the verdict
+const REVISE_PLAN = `The Plan Reviewer has requested revisions. Read ${DIR}/feedback.md for OPEN items tagged PLAN_REVIEW.
+
+Address each item by revising the plan files. Move resolved feedback to the "Resolved Feedback" section with a resolution note.`
 const task = body => `<task>\nVersion: ${PLAN}\n\n${body}\n</task>`
 
 // ---------------------------------------------------------------------------
@@ -317,9 +320,7 @@ If the plan is good: record the approval in feedback.md and signal PLAN_APPROVED
     if (!r) return { ok: false, why: 'plan reviewer failed' }
     history.push(`plan review ${i}: ${r.signal}`)
     if (r.signal === 'PLAN_APPROVED') return { ok: true, phases, iterations: i }
-    plannerTask = `The Plan Reviewer has requested revisions. Read ${DIR}/feedback.md for OPEN items tagged PLAN_REVIEW.
-
-Address each item by revising the plan files. Move resolved feedback to the "Resolved Feedback" section with a resolution note.`
+    plannerTask = REVISE_PLAN
   }
   return { ok: false, why: `plan not approved after ${MAX_ITER} iterations` }
 }
@@ -424,7 +425,11 @@ if (input.rework && (state.finalVerdict === 'NO-GO' || state.finalVerdict === 'U
   const source = state.finalVerdict === 'NO-GO' ? 'FINAL_REVIEW' : 'UNVERIFIED (under "## Verification")'
   const plan = await planLoop(`Rework after ${state.finalVerdict}. Read ${DIR}/feedback.md for the ${source} items.
 
-Revise the plan to address them: fix plan-level issues in the existing phase files, and add new Phase-N.md files (numbered after the last existing phase) for implementation work. Tag new phases the same way as existing ones.`, false)
+Revise the plan to address them: fix plan-level issues in the existing phase files, and add new Phase-N.md files (numbered after the last existing phase) for implementation work. Tag new phases the same way as existing ones.
+
+Then record that the rework is planned, so an interrupted run resumes it instead of re-planning: ${state.finalVerdict === 'NO-GO'
+    ? 'move each FINAL_REVIEW item to "Resolved Feedback" with a resolution naming the phase that addresses it.'
+    : 'append the line REPLANNED under "## Verification".'}`, false)
   if (!plan.ok) return stopped(plan.why)
   planApproved = true
   // New phases start unreviewed; previously approved phases stay approved.
@@ -435,7 +440,10 @@ Revise the plan to address them: fix plan-level issues in the existing phase fil
 // Main line.
 // ---------------------------------------------------------------------------
 if (!planApproved) {
-  const plan = await planLoop(PLANNER_TASK[FLOW], state.planFilesExist && !state.openPlanReview)
+  // Existing plan files: open review items resume at revision, otherwise at
+  // review. Never re-send the creation task over an existing plan.
+  const opening = state.planFilesExist ? (state.openPlanReview ? REVISE_PLAN : null) : PLANNER_TASK[FLOW]
+  const plan = await planLoop(opening, opening === null)
   if (!plan.ok) return stopped(plan.why)
   phases = plan.phases || phases
   log(`Plan approved after ${plan.iterations} iteration(s); ${phases.length} phase(s)`)
@@ -489,7 +497,9 @@ Record the result in ${DIR}/feedback.md under a "## Verification" heading (add i
 
 Create a NEW remediation plan addressing ONLY the unverified items. Previous plan files exist — create new Phase-N.md files starting after the last existing phase number.
 
-Tag every phase with [HYGIENIST], [IMPLEMENTER], [FORTIFIER], or [DOC-ENGINEER].`, false)
+Tag every phase with [HYGIENIST], [IMPLEMENTER], [FORTIFIER], or [DOC-ENGINEER].
+
+Then append the line REPLANNED under "## Verification", so an interrupted run resumes these phases instead of re-planning.`, false)
   if (!plan.ok) return stopped(plan.why)
   phases = plan.phases || phases
   impl = await runPhases(phases, n => (before.has(n) ? 'approved' : 'not-started'))

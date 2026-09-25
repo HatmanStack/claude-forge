@@ -155,7 +155,7 @@ TOOL_EVENTS = {"PreToolUse", "PostToolUse", "PostToolUseFailure"}
 EVENTS = ["UserPromptSubmit", "PreToolUse", "PostToolUse",
           "PostToolUseFailure", "SubagentStart", "SubagentStop", "PermissionRequest",
           "PermissionDenied", "PreCompact", "PostCompact", "InstructionsLoaded",
-          "Stop", "StopFailure", "SessionEnd"]
+          "StopFailure", "SessionEnd"]
 def entry(event):
     h = {"type": "command", "command": cmd}
     if event not in SYNC:

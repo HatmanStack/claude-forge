@@ -20,8 +20,9 @@ Wired to Claude Code hooks by bin/install-tracing.sh (see also
     - PermissionRequest / PermissionDenied → permission_{requested,denied}:<tool>
     - PreCompact / PostCompact         → compaction span (real duration)
     - InstructionsLoaded               → instructions.loaded span
-    - Stop (only with no background work in flight) / StopFailure / SessionEnd
-                                       → session_complete (idempotent)
+    - StopFailure                      → marks the session errored
+    - SessionEnd                       → session_complete, covering every turn
+                                         (re-armed if the session is resumed)
 
 Spans are arranged hierarchically:
     session: <user prompt>
@@ -947,23 +948,16 @@ def _root_carrier(state_dir):
     return (root or {}).get("carrier") or {}
 
 
-def _emit_session_complete(payload, state_dir, is_error=False):
-    """Emit the session_complete span. Idempotent: marks `complete_emitted` in
-    _root.json so multiple triggers (Stop per idle turn, SessionEnd once at
-    close, StopFailure on API error) collapse to a single span per session."""
+def _emit_session_complete(payload, state_dir):
+    """SessionEnd: emit the session_complete span, covering every turn of the
+    session. Stop is not used: it fires after every turn, so a summary emitted
+    there covered only the first. Idempotent per session end; a resumed
+    session (UserPromptSubmit after completion) re-arms it."""
     with _locked(state_dir):
         root = _read_json(state_dir / "_root.json")
-        if not root:
+        if not root or root.get("complete_emitted"):
             return
-        if root.get("complete_emitted"):
-            # Update error status if a later signal escalates from clean → error.
-            if is_error and not root.get("complete_error"):
-                root["complete_error"] = True
-                try:
-                    _write_json(state_dir / "_root.json", root)
-                except Exception:
-                    pass
-            return
+        is_error = bool(root.get("error"))
         end_ns = time.time_ns()
         start_ns = root.get("start_ns") or end_ns
         span = _otel()["tracer"].start_span(
@@ -994,20 +988,31 @@ def _emit_session_complete(payload, state_dir, is_error=False):
         # parent under the same trace_id. State accumulates in /tmp but the OS reaps it.
         try:
             root["complete_emitted"] = True
-            root["complete_error"] = bool(is_error)
             root["stopped_at_ns"] = end_ns
             _write_json(state_dir / "_root.json", root)
         except Exception:
             pass
 
 
-def _handle_stop(payload, state_dir):
-    """Stop fires at the end of every orchestrator turn — including turns that
-    end while agents are still running in the background. Only a turn with no
-    in-flight background work ends the session."""
-    if payload.get("background_tasks"):
-        return
-    _emit_session_complete(payload, state_dir)
+def _handle_stop_failure(payload, state_dir):
+    """A turn ended on an API error: the session_complete emitted at
+    SessionEnd carries ERROR status."""
+    with _locked(state_dir):
+        root = _read_json(state_dir / "_root.json")
+        if root:
+            root["error"] = True
+            _write_json(state_dir / "_root.json", root)
+
+
+def _handle_user_prompt(payload, state_dir):
+    """Root anchor on the first prompt. A prompt after the session completed
+    (claude --resume) re-arms completion for the next SessionEnd."""
+    _ensure_root_from(payload, state_dir)
+    with _locked(state_dir):
+        root = _read_json(state_dir / "_root.json")
+        if root and root.get("complete_emitted"):
+            root["complete_emitted"] = False
+            _write_json(state_dir / "_root.json", root)
 
 
 def _parent_ctx(state_dir, agent_id=""):
@@ -1428,10 +1433,9 @@ def _handle_tool_post(payload, state_dir, tool_use_id, is_failure):
 # ---------------- entry point ----------------
 
 _HANDLERS = {
-    "UserPromptSubmit": _ensure_root_from,
-    "SessionEnd": lambda p, d: _emit_session_complete(p, d),
-    "Stop": _handle_stop,
-    "StopFailure": lambda p, d: _emit_session_complete(p, d, is_error=True),
+    "UserPromptSubmit": _handle_user_prompt,
+    "SessionEnd": _emit_session_complete,
+    "StopFailure": _handle_stop_failure,
     "PermissionDenied": lambda p, d: _handle_permission(p, d, denied=True),
     "PermissionRequest": lambda p, d: _handle_permission(p, d, denied=False),
     "PreCompact": _handle_pre_compact,

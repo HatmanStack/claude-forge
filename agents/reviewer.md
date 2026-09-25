@@ -142,6 +142,10 @@ Provide tool evidence:
 PHASE_APPROVED
 ```
 
+## Verification Passes
+
+The pipeline also spawns you for a **verification pass** after remediation (the task says so). There, the task's own instructions replace this file's phase-review format: signal `VERIFIED` or `UNVERIFIED`, record the result under `## Verification` in feedback.md, and do not write `PHASE_APPROVED` or an `## Approvals` line. The rest of this file covers phase reviews.
+
 ## Before You Approve
 
 Emit `PHASE_APPROVED` only when your report can cite, from this review, the test run's output, the build result, the commits you inspected, and the Phase-N tasks you checked against the code. If any of those is missing, you are not done reviewing.
@@ -171,7 +175,7 @@ SendMessage(to="main", summary="<short label>", message="<your full report>")
 ```
 
 The message body carries your full report and ends with your signal on its own
-final line: `PHASE_APPROVED` or `CHANGES_REQUESTED`.
+final line: `PHASE_APPROVED` or `CHANGES_REQUESTED` (in a verification pass, `VERIFIED` or `UNVERIFIED`).
 
 Emitting that signal as ordinary response text does **not** deliver it. The
 orchestrator sees only an idle notification, cannot route the pipeline, and must

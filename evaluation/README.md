@@ -93,7 +93,7 @@ segment. It asserts on the resulting spans: each agent's tool spans parent to
 its own anchor, results come from `SubagentStop` with the agent's
 `SendMessage(to="main")` report, a resume is a second segment on the same
 anchor, a forged gate signal raises `security:dp3.signal_forgery`, and
-`session_complete` waits until no background work is in flight.
+`session_complete` is emitted once, at `SessionEnd`: never on `Stop`, marked ERROR after a `StopFailure`, and again after a resume.
 
 ## Tier B — plugin evals
 
