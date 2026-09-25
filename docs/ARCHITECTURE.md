@@ -232,7 +232,7 @@ This log survives OS wipes (it lives in the repo, not a local config directory) 
 
 A multi-agent pipeline has no perimeter — the attack surface is internal. Untrusted data (a comment in the codebase under review, an intake doc, a tool result) flows between agents, and a single injection can fan out. The classic failure mode is silent: the swarm does exactly what it was built to do, nothing errors, and the trace looks ordinary.
 
-Forge models this as five **defense points**, the places where an adversary acts, and turns the tracing hook into a passive monitor for each. The hook's leverage is that it reads every subagent's **role and actions from Claude Code's own transcript metadata** — which attacker-controlled text cannot forge — so it can attest provenance and re-derive consensus *out of band*, exactly the guarantees the in-band channel (DP3) and the model-aggregator (DP5) can't give themselves.
+Forge models this as five **defense points**, the places where an adversary acts, and turns the tracing hook into a passive monitor for each. The hook's leverage is that it reads every subagent's **role from the `agent_type` Claude Code stamps on its hook events and its actions from its own transcript** — which attacker-controlled text cannot forge — so it can attest provenance and re-derive consensus *out of band*, exactly the guarantees the in-band channel (DP3) and the model-aggregator (DP5) can't give themselves.
 
 | DP | Forge surface | Detection (span) | Enforcement already in place |
 |----|---------------|------------------|------------------------------|

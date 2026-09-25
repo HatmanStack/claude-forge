@@ -12,7 +12,13 @@
 # Usage:
 #   bash bin/install-tracing.sh                 # install + write settings to ./.claude/
 #   bash bin/install-tracing.sh --no-settings   # install only; print settings snippet
+#   bash bin/install-tracing.sh --all-tools     # hook every tool call (for CLAUDE_FORGE_TRACE_INNER=1)
 #   bash bin/install-tracing.sh --uninstall     # remove the venv + installed hook
+#
+# Tool hooks match only the tools traced by default (Agent, SendMessage and the
+# file-mutation tools), so the other tool calls never start a Python process.
+# Everything except PreToolUse, SubagentStart and SessionEnd runs as an async
+# hook: tracing never delays a tool call.
 #
 set -euo pipefail
 
@@ -51,7 +57,14 @@ if [[ "${1:-}" == "--uninstall" ]]; then
 fi
 
 WRITE_SETTINGS=1
-[[ "${1:-}" == "--no-settings" ]] && WRITE_SETTINGS=0
+TOOL_MATCHER="Agent|SendMessage|Write|Edit|MultiEdit|NotebookEdit"
+for arg in "$@"; do
+  case "$arg" in
+    --no-settings) WRITE_SETTINGS=0 ;;
+    --all-tools)   TOOL_MATCHER=".*" ;;
+    *) die "Unknown option: $arg" ;;
+  esac
+done
 
 # ---------------- 1. verify source hook ----------------
 [[ -f "$SRC_HOOK" ]] || die "Hook not found at $SRC_HOOK — is this script inside the claude-forge repo?"
@@ -131,37 +144,29 @@ else
 fi
 
 # ---------------- 7. write/merge settings ----------------
-SETTINGS_SNIPPET=$(cat <<JSON
-{
-  "hooks": {
-    "SessionStart":       [ { "hooks": [ { "type": "command", "command": "$HOOK_CMD" } ] } ],
-    "UserPromptSubmit":   [ { "hooks": [ { "type": "command", "command": "$HOOK_CMD" } ] } ],
-    "PreToolUse":         [ { "matcher": ".*", "hooks": [ { "type": "command", "command": "$HOOK_CMD" } ] } ],
-    "PostToolUse":        [ { "matcher": ".*", "hooks": [ { "type": "command", "command": "$HOOK_CMD" } ] } ],
-    "PostToolUseFailure": [ { "matcher": ".*", "hooks": [ { "type": "command", "command": "$HOOK_CMD" } ] } ],
-    "PermissionRequest":  [ { "matcher": ".*", "hooks": [ { "type": "command", "command": "$HOOK_CMD" } ] } ],
-    "PermissionDenied":   [ { "matcher": ".*", "hooks": [ { "type": "command", "command": "$HOOK_CMD" } ] } ],
-    "PreCompact":         [ { "hooks": [ { "type": "command", "command": "$HOOK_CMD" } ] } ],
-    "PostCompact":        [ { "hooks": [ { "type": "command", "command": "$HOOK_CMD" } ] } ],
-    "InstructionsLoaded": [ { "hooks": [ { "type": "command", "command": "$HOOK_CMD" } ] } ],
-    "Stop":               [ { "hooks": [ { "type": "command", "command": "$HOOK_CMD" } ] } ],
-    "StopFailure":        [ { "hooks": [ { "type": "command", "command": "$HOOK_CMD" } ] } ],
-    "SessionEnd":         [ { "hooks": [ { "type": "command", "command": "$HOOK_CMD" } ] } ]
-  }
-}
-JSON
-)
-
-if [[ "$WRITE_SETTINGS" == "0" ]]; then
-  echo
-  say "--no-settings: skipping settings.local.json. Add this to your project:"
-  echo "$SETTINGS_SNIPPET"
-else
-  say "Merging hooks into $SETTINGS_FILE"
-  mkdir -p "$SETTINGS_DIR"
-  "$VENV_PY" - "$SETTINGS_FILE" "$HOOK_CMD" <<'PY'
+# One definition of the hook wiring, used both to print the snippet and to merge.
+# Sync: PreToolUse (records start state the async events read), SubagentStart
+# (opens run segments in order), SessionEnd (the process is exiting).
+SETTINGS_PY=$(cat <<'PY'
 import json, os, sys
-path, cmd = sys.argv[1], sys.argv[2]
+mode, path, cmd, matcher = sys.argv[1:5]
+SYNC = {"PreToolUse", "SubagentStart", "SessionEnd"}
+TOOL_EVENTS = {"PreToolUse", "PostToolUse", "PostToolUseFailure"}
+EVENTS = ["UserPromptSubmit", "PreToolUse", "PostToolUse",
+          "PostToolUseFailure", "SubagentStart", "SubagentStop", "PermissionRequest",
+          "PermissionDenied", "PreCompact", "PostCompact", "InstructionsLoaded",
+          "Stop", "StopFailure", "SessionEnd"]
+def entry(event):
+    h = {"type": "command", "command": cmd}
+    if event not in SYNC:
+        h["async"] = True
+    e = {"hooks": [h]}
+    if event in TOOL_EVENTS:
+        e["matcher"] = matcher
+    return e
+if mode == "print":
+    print(json.dumps({"hooks": {ev: [entry(ev)] for ev in EVENTS}}, indent=2))
+    sys.exit(0)
 data = {}
 if os.path.exists(path):
     try:
@@ -172,35 +177,33 @@ if os.path.exists(path):
         os.rename(path, path + ".bak")
         data = {}
 hooks = data.setdefault("hooks", {})
-def upsert(event, entry):
-    items = hooks.setdefault(event, [])
+for event in list(hooks):
     # Remove any prior claude-forge tracing entry pointing at the same script.
-    items[:] = [
-        it for it in items
+    hooks[event] = [
+        it for it in hooks[event]
         if not any(
             isinstance(h, dict) and "trace_subagents.py" in (h.get("command") or "")
             for h in (it.get("hooks") or [])
         )
     ]
-    items.append(entry)
-plain = {"type": "command", "command": cmd}
-upsert("SessionStart",         {"hooks": [plain]})
-upsert("UserPromptSubmit",     {"hooks": [plain]})
-upsert("PreToolUse",           {"matcher": ".*", "hooks": [plain]})
-upsert("PostToolUse",          {"matcher": ".*", "hooks": [plain]})
-upsert("PostToolUseFailure",   {"matcher": ".*", "hooks": [plain]})
-upsert("PermissionRequest",    {"matcher": ".*", "hooks": [plain]})
-upsert("PermissionDenied",     {"matcher": ".*", "hooks": [plain]})
-upsert("PreCompact",           {"hooks": [plain]})
-upsert("PostCompact",          {"hooks": [plain]})
-upsert("InstructionsLoaded",   {"hooks": [plain]})
-upsert("Stop",                 {"hooks": [plain]})
-upsert("StopFailure",          {"hooks": [plain]})
-upsert("SessionEnd",           {"hooks": [plain]})
+    if not hooks[event]:
+        del hooks[event]
+for event in EVENTS:
+    hooks.setdefault(event, []).append(entry(event))
 with open(path, "w") as f:
     json.dump(data, f, indent=2)
     f.write("\n")
 PY
+)
+
+if [[ "$WRITE_SETTINGS" == "0" ]]; then
+  echo
+  say "--no-settings: skipping settings.local.json. Add this to your project:"
+  "$VENV_PY" -c "$SETTINGS_PY" print - "$HOOK_CMD" "$TOOL_MATCHER"
+else
+  say "Merging hooks into $SETTINGS_FILE"
+  mkdir -p "$SETTINGS_DIR"
+  "$VENV_PY" -c "$SETTINGS_PY" merge "$SETTINGS_FILE" "$HOOK_CMD" "$TOOL_MATCHER"
   ok "Settings updated. Existing keys preserved."
 fi
 

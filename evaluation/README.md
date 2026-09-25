@@ -9,7 +9,7 @@ deterministic at the base, realistic at the top.
 | **A — Contracts** | Deterministic structural checks (frontmatter, tool policy, wiring, manifests) | `tier_a_contracts/` | Every push / PR |
 | **B — Single agent** | Rubric checks of one agent against fixtures (the agent's own reviewer is its rubric) | _planned_ | Nightly (LLM-costed) |
 | **C — Trajectory** | Governance-signal order validators (provenance, gate order, no skipped review) | `tier_c_trajectory/` + `check_run.py` | Synthetic per-PR; real runs nightly |
-| **D — Live traces** | OpenTelemetry → Jaeger, plus `security:dp{1..5}.*` spans | `../hooks/trace_subagents.py` | On real runs |
+| **D — Live traces** | OpenTelemetry → Jaeger, plus `security:dp{1..5}.*` spans; a replay of recorded hook events guards the hook itself | `../hooks/trace_subagents.py`, `tier_d_tracing/` | Replay per-PR; traces on real runs |
 
 Forge is itself an evaluation system (its adversarial reviewers are in-pipeline
 rubric judges). This harness evaluates *Forge* — so refactors like the
@@ -24,7 +24,13 @@ python -m pytest evaluation/tier_a_contracts
 python -m pytest evaluation/tier_c_trajectory
 ```
 
-No network, no LLM, no API keys — Tiers A and C are pure-stdlib + pytest.
+No network, no LLM, no API keys — Tiers A and C are pure-stdlib + pytest. The Tier D replay
+also needs `opentelemetry-sdk` (spans go to an in-memory exporter) and skips without it:
+
+```bash
+python -m pip install pytest opentelemetry-sdk opentelemetry-exporter-otlp-proto-grpc
+python -m pytest evaluation/tier_d_tracing
+```
 
 ## Tier A — contracts
 
@@ -60,3 +66,15 @@ python evaluation/check_run.py /tmp/claude-forge-tracing/<session>/trace-summary
 
 This is the bridge from Tier D (observability) to Tier C (assertion): the same
 trace data that powers Jaeger also proves the run followed the protocol.
+
+## Tier D — hook replay
+
+`tier_d_tracing/test_hook_replay.py` feeds the trace hook a hook-event sequence
+shaped like a live Agent Teams run: two evaluators spawned in parallel (the
+Agent tool's PostToolUse is only a `status: async_launched` receipt), tool
+calls carrying `agent_id`, a `SendMessage` resume, and `SubagentStop` per run
+segment. It asserts on the resulting spans: each agent's tool spans parent to
+its own anchor, results come from `SubagentStop` with the agent's
+`SendMessage(to="main")` report, a resume is a second segment on the same
+anchor, a forged gate signal raises `security:dp3.signal_forgery`, and
+`session_complete` waits until no background work is in flight.

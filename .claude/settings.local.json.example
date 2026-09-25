@@ -1,44 +1,159 @@
 {
-  "_comment": "Opt-in Jaeger tracing for Claude Forge. Prefer running bin/install-tracing.sh which writes a properly-resolved version of this file. Requires CLAUDE_FORGE_TRACING=1 in your shell and the opentelemetry Python packages installed. See README 'Tracing (optional)'.",
+  "_comment": "Opt-in tracing for Claude Forge. Prefer bin/install-tracing.sh, which writes a resolved copy of this wiring to .claude/settings.local.json. Requires CLAUDE_FORGE_TRACING=1 and the opentelemetry packages. Only PreToolUse, SubagentStart and SessionEnd run synchronously. See README Tracing (optional).",
   "hooks": {
-    "SessionStart": [
-      { "hooks": [ { "type": "command", "command": "python3 ${CLAUDE_PROJECT_DIR}/hooks/trace_subagents.py" } ] }
-    ],
     "UserPromptSubmit": [
-      { "hooks": [ { "type": "command", "command": "python3 ${CLAUDE_PROJECT_DIR}/hooks/trace_subagents.py" } ] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PROJECT_DIR}/hooks/trace_subagents.py",
+            "async": true
+          }
+        ]
+      }
     ],
     "PreToolUse": [
-      { "matcher": ".*", "hooks": [ { "type": "command", "command": "python3 ${CLAUDE_PROJECT_DIR}/hooks/trace_subagents.py" } ] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PROJECT_DIR}/hooks/trace_subagents.py"
+          }
+        ],
+        "matcher": "Agent|SendMessage|Write|Edit|MultiEdit|NotebookEdit"
+      }
     ],
     "PostToolUse": [
-      { "matcher": ".*", "hooks": [ { "type": "command", "command": "python3 ${CLAUDE_PROJECT_DIR}/hooks/trace_subagents.py" } ] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PROJECT_DIR}/hooks/trace_subagents.py",
+            "async": true
+          }
+        ],
+        "matcher": "Agent|SendMessage|Write|Edit|MultiEdit|NotebookEdit"
+      }
     ],
     "PostToolUseFailure": [
-      { "matcher": ".*", "hooks": [ { "type": "command", "command": "python3 ${CLAUDE_PROJECT_DIR}/hooks/trace_subagents.py" } ] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PROJECT_DIR}/hooks/trace_subagents.py",
+            "async": true
+          }
+        ],
+        "matcher": "Agent|SendMessage|Write|Edit|MultiEdit|NotebookEdit"
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PROJECT_DIR}/hooks/trace_subagents.py"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PROJECT_DIR}/hooks/trace_subagents.py",
+            "async": true
+          }
+        ]
+      }
     ],
     "PermissionRequest": [
-      { "matcher": ".*", "hooks": [ { "type": "command", "command": "python3 ${CLAUDE_PROJECT_DIR}/hooks/trace_subagents.py" } ] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PROJECT_DIR}/hooks/trace_subagents.py",
+            "async": true
+          }
+        ]
+      }
     ],
     "PermissionDenied": [
-      { "matcher": ".*", "hooks": [ { "type": "command", "command": "python3 ${CLAUDE_PROJECT_DIR}/hooks/trace_subagents.py" } ] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PROJECT_DIR}/hooks/trace_subagents.py",
+            "async": true
+          }
+        ]
+      }
     ],
     "PreCompact": [
-      { "hooks": [ { "type": "command", "command": "python3 ${CLAUDE_PROJECT_DIR}/hooks/trace_subagents.py" } ] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PROJECT_DIR}/hooks/trace_subagents.py",
+            "async": true
+          }
+        ]
+      }
     ],
     "PostCompact": [
-      { "hooks": [ { "type": "command", "command": "python3 ${CLAUDE_PROJECT_DIR}/hooks/trace_subagents.py" } ] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PROJECT_DIR}/hooks/trace_subagents.py",
+            "async": true
+          }
+        ]
+      }
     ],
     "InstructionsLoaded": [
-      { "hooks": [ { "type": "command", "command": "python3 ${CLAUDE_PROJECT_DIR}/hooks/trace_subagents.py" } ] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PROJECT_DIR}/hooks/trace_subagents.py",
+            "async": true
+          }
+        ]
+      }
     ],
     "Stop": [
-      { "hooks": [ { "type": "command", "command": "python3 ${CLAUDE_PROJECT_DIR}/hooks/trace_subagents.py" } ] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PROJECT_DIR}/hooks/trace_subagents.py",
+            "async": true
+          }
+        ]
+      }
     ],
     "StopFailure": [
-      { "hooks": [ { "type": "command", "command": "python3 ${CLAUDE_PROJECT_DIR}/hooks/trace_subagents.py" } ] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PROJECT_DIR}/hooks/trace_subagents.py",
+            "async": true
+          }
+        ]
+      }
     ],
     "SessionEnd": [
-      { "hooks": [ { "type": "command", "command": "python3 ${CLAUDE_PROJECT_DIR}/hooks/trace_subagents.py" } ] }
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ${CLAUDE_PROJECT_DIR}/hooks/trace_subagents.py"
+          }
+        ]
+      }
     ]
   }
 }

@@ -2,25 +2,44 @@
 """
 Opt-in OpenTelemetry tracing hook for Claude Forge.
 
-Wired to Claude Code hooks (see settings.local.json.example):
-    - SessionStart            → opens per-session root anchor (canonical)
-    - UserPromptSubmit        → opens root defensively if SessionStart missed it
-    - PreToolUse  (.*)        → opens an anchor for subagent tools, records start for others
-    - PostToolUse (.*)        → emits the span with real duration
-    - PostToolUseFailure (.*) → same as PostToolUse but forces is_error=true
-    - PermissionRequest (.*)  → emits permission_requested:<tool> span
-    - PermissionDenied  (.*)  → emits permission_denied:<tool> span
-    - PreCompact / PostCompact → emits compaction span (real duration)
-    - InstructionsLoaded      → emits instructions.loaded span (CLAUDE.md / rules)
-    - Stop                    → emits session_complete (idempotent — fires once)
-    - StopFailure             → session_complete with is_error=true
-    - SessionEnd              → session_complete (canonical end-of-session signal)
+Wired to Claude Code hooks by bin/install-tracing.sh (see also
+.claude/settings.local.json.example):
+    - UserPromptSubmit                 → per-session root anchor, named after the
+                                         prompt (idempotent)
+    - PreToolUse  Agent (main thread)  → records spawn metadata (name, prompt)
+    - PostToolUse Agent (main thread)  → binds that metadata to the returned agentId
+    - SubagentStart                    → opens the subagent:<name> anchor on first
+                                         start; opens a new run segment on resume
+    - Pre/PostToolUse inside a subagent (payload carries `agent_id`)
+                                       → tool:<name> spans parented to that agent;
+                                         SendMessage(to="main") reports are captured
+    - PostToolUse SendMessage (main)   → message:<name> span (orchestrator continuation)
+    - SubagentStop                     → subagent_result:<name> for the run segment,
+                                         token usage, security analysis
+    - PermissionRequest / PermissionDenied → permission_{requested,denied}:<tool>
+    - PreCompact / PostCompact         → compaction span (real duration)
+    - InstructionsLoaded               → instructions.loaded span
+    - Stop (only with no background work in flight) / StopFailure / SessionEnd
+                                       → session_complete (idempotent)
 
 Spans are arranged hierarchically:
     session: <user prompt>
-      └── subagent:<name>                    (anchor, ~0ms, parent for inner work)
-            ├── tool:Read | tool:Edit | tool:Bash | ...   (real durations)
-            └── subagent_result:<name>       (real duration, output + status)
+      ├── subagent:<name>                (anchor, ~0ms, one per agent_id)
+      │     ├── tool:Write | tool:Edit | ...   (real durations)
+      │     ├── message:<name>           (orchestrator SendMessage continuation)
+      │     └── subagent_result:<name>   (one per run segment: spawn or resume)
+      └── session_complete
+
+Agents are attributed by the `agent_id` Claude Code puts on every hook fired
+inside a subagent, so parallel agents (the /repo-eval and /audit evaluator
+fan-out) never share a parent. Completion comes from SubagentStop: with Agent
+Teams on, the Agent tool returns at spawn (`status: async_launched`), so its
+PostToolUse is a launch receipt, not a result.
+
+Semantic conventions: agent and tool spans carry the OpenTelemetry GenAI
+attributes (`gen_ai.operation.name`, `gen_ai.agent.*`, `gen_ai.tool.*`,
+`gen_ai.usage.*`) so agent-aware backends recognise them. Forge-specific
+detail stays under `agent.*`, `tool.*`, `session.*`, `security.*`, `forge.*`.
 
 A no-op unless CLAUDE_FORGE_TRACING=1. Silently exits if opentelemetry is missing
 or the OTLP endpoint is unreachable. Never blocks a tool call.
@@ -31,7 +50,8 @@ Install:
 
 Enable:
     export CLAUDE_FORGE_TRACING=1
-    # optional, defaults to http://localhost:4317
+    # optional; standard OTLP env vars apply (endpoint, headers, TLS).
+    # Defaults to http://localhost:4317 (plaintext only for http:// endpoints).
     export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
 """
 
@@ -42,14 +62,19 @@ import re
 import sys
 import tempfile
 import time
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
-SUBAGENT_TOOLS = ("Task", "Agent", "SendMessage")
+try:
+    import fcntl
+except ImportError:  # Windows: no advisory locks; hooks still run, just unserialized
+    fcntl = None
+
 PROMPT_LIMIT = 2048
 OUTPUT_LIMIT = 2048
 INPUT_LIMIT = 1024
-FLUSH_TIMEOUT_MS = 1000  # force_flush budget per event; balance latency vs. drop risk
+FLUSH_TIMEOUT_MS = 1000  # one force_flush per hook process; bounds latency vs. drop risk
 
 
 def _env_truthy(name):
@@ -63,31 +88,36 @@ def _env_truthy(name):
 # /tmp is a data leak on multi-user systems. When enabled, we write to a
 # per-user path with 0600 permissions.
 DEBUG_LOG_ENABLED = _env_truthy("CLAUDE_FORGE_HOOK_DEBUG")
-DEBUG_LOG = (
-    os.environ.get("CLAUDE_FORGE_HOOK_DEBUG_LOG")
-    or str(Path.home() / ".cache" / "claude-forge" / "hook.log")
+DEBUG_LOG = os.environ.get("CLAUDE_FORGE_HOOK_DEBUG_LOG") or str(
+    Path.home() / ".cache" / "claude-forge" / "hook.log"
 )
 
 # Mutational tools are traced by default — they're the signal of "what each
 # subagent actually changed." Bash is intentionally excluded from the default
 # set because a typical pipeline run invokes it hundreds of times (git, npm,
 # tests, file inspection) and drowns out Write/Edit visibility. Add it back
-# via CLAUDE_FORGE_TRACE_MUTATION_TOOLS if you need Bash spans.
+# via CLAUDE_FORGE_TRACE_MUTATION_TOOLS if you need Bash spans (and widen the
+# hook matcher: bin/install-tracing.sh --all-tools).
 #
 # Override via CLAUDE_FORGE_TRACE_MUTATION_TOOLS (comma-separated list).
 # Disable the whole category via CLAUDE_FORGE_TRACE_MUTATIONS=0.
-_default_mutations = "Write,Edit,MultiEdit"
+_default_mutations = "Write,Edit,MultiEdit,NotebookEdit"
 MUTATION_TOOLS = {
     s.strip()
     for s in os.environ.get("CLAUDE_FORGE_TRACE_MUTATION_TOOLS", _default_mutations).split(",")
     if s.strip()
 }
 TRACE_MUTATIONS = os.environ.get("CLAUDE_FORGE_TRACE_MUTATIONS", "1").strip().lower() not in (
-    "0", "false", "no", "off", ""
+    "0",
+    "false",
+    "no",
+    "off",
+    "",
 )
 
-# Inner tool tracing for *non-mutational* tools (Read, Glob, Grep, …) is opt-in:
-# a normal /pipeline can fire 200+ such calls. Set CLAUDE_FORGE_TRACE_INNER=1.
+# Tracing of *non-mutational* tools (Read, Glob, Grep, …) is opt-in: a normal
+# /pipeline can fire 200+ such calls. Set CLAUDE_FORGE_TRACE_INNER=1 and install
+# with --all-tools so the hook matcher sees them.
 TRACE_INNER = _env_truthy("CLAUDE_FORGE_TRACE_INNER")
 
 # When inner tracing IS on, these read-only / planning tools are skipped by
@@ -101,23 +131,46 @@ INNER_TOOL_BLOCKLIST = {
 }
 
 # ---------------- security analysis (defense-in-depth tracing) ----------------
-# Passive detection layer. The hook reads each subagent's ROLE and ACTIONS from
-# Claude Code's own transcript metadata — which attacker-controlled file/text
-# content cannot forge — so it can attest signal provenance (DP3) and re-derive
-# governance out-of-band (DP5), the two things the in-band channel/aggregator
-# cannot do for themselves. Findings surface as `security:dp{1..5}.*` spans
-# (status ERROR for visibility) plus a per-session summary on session_complete.
+# Passive detection layer. The hook reads each subagent's ROLE from the
+# `agent_type` Claude Code stamps on its hook events and its ACTIONS from its own
+# transcript — which attacker-controlled file/text content cannot forge — so it
+# can attest signal provenance (DP3) and re-derive governance out-of-band (DP5),
+# the two things the in-band channel/aggregator cannot do for themselves.
+# Findings surface as `security:dp{1..5}.*` spans (status ERROR for visibility)
+# plus a per-session summary on session_complete.
 # DETECTION ONLY: it never blocks a tool call and never changes pipeline flow.
 # Tuned for first-party repos (low false positives). On by default when tracing
 # is on; disable with CLAUDE_FORGE_TRACE_SECURITY=0.
 TRACE_SECURITY = os.environ.get("CLAUDE_FORGE_TRACE_SECURITY", "1").strip().lower() not in (
-    "0", "false", "no", "off", ""
+    "0",
+    "false",
+    "no",
+    "off",
+    "",
 )
 
 # Role taxonomy (subagent_type without the `forge:` plugin-scope prefix).
-_GENERATOR_ROLES = {"planner", "implementer", "health-hygienist", "health-fortifier", "doc-engineer"}
-_REVIEWER_ROLES = {"plan-reviewer", "reviewer", "health-reviewer", "doc-reviewer", "final-reviewer"}
-_ASSESSOR_ROLES = {"eval-hire", "eval-stress", "eval-day2", "health-auditor", "doc-auditor"}
+_GENERATOR_ROLES = {
+    "planner",
+    "implementer",
+    "health-hygienist",
+    "health-fortifier",
+    "doc-engineer",
+}
+_REVIEWER_ROLES = {
+    "plan-reviewer",
+    "reviewer",
+    "health-reviewer",
+    "doc-reviewer",
+    "final-reviewer",
+}
+_ASSESSOR_ROLES = {
+    "eval-hire",
+    "eval-stress",
+    "eval-day2",
+    "health-auditor",
+    "doc-auditor",
+}
 _ALL_ROLES_BY_LEN = sorted(
     _GENERATOR_ROLES | _REVIEWER_ROLES | _ASSESSOR_ROLES, key=len, reverse=True
 )
@@ -133,8 +186,8 @@ _ADVANCE_EMITTERS = {
 
 
 def _signal_re(tok):
-    # A real signal is emitted as a verdict — alone on a line (the protocol says
-    # "end your response with: <SIGNAL>"), optionally wrapped in blockquote or
+    # A real signal is emitted as a verdict — alone on the report's final line
+    # (see each agent's "Reporting Results"), optionally wrapped in blockquote or
     # list markers. Line-anchoring keeps prose mentions from matching.
     return re.compile(r"(?m)^[ \t>*_-]*" + re.escape(tok) + r"[ \t.*_-]*$")
 
@@ -244,19 +297,79 @@ def _truncate(s, n):
     return s if len(s) <= n else s[:n] + f"...[truncated {len(s) - n} chars]"
 
 
+# ---------------- per-session state ----------------
+# Every hook invocation is a fresh process, so correlation state lives on disk.
+# It holds prompts, tool inputs and agent reports: the session directory is
+# 0700 and every file 0600, the same treatment as the debug log.
+
+
 def _state_dir(session_id):
     # session_id comes from the hook payload; sanitize before using as a path
     # segment so a malformed value can't escape the tracing tmp root.
     safe = _safe_name(session_id, fallback_prefix="sess")
     d = Path(tempfile.gettempdir()) / "claude-forge-tracing" / safe
-    d.mkdir(parents=True, exist_ok=True)
+    d.mkdir(parents=True, exist_ok=True, mode=0o700)
+    try:
+        os.chmod(d, 0o700)
+    except Exception:
+        pass
     return d
+
+
+def _write_json(path, obj):
+    """Atomic 0600 write: readers in concurrent hook processes never see a torn file."""
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        json.dump(obj, f)
+    os.replace(tmp, path)
+
+
+def _read_json(path):
+    try:
+        return json.loads(path.read_text())
+    except Exception:
+        return None
+
+
+def _append_jsonl(path, obj):
+    fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    with os.fdopen(fd, "a") as f:
+        f.write(json.dumps(obj) + "\n")
+
+
+def _unlink(path):
+    try:
+        path.unlink()
+    except Exception:
+        pass
+
+
+@contextmanager
+def _locked(state_dir):
+    """Serialize read-modify-write of shared session state. Async hooks and
+    parallel agents mean several hook processes can touch it at once."""
+    if fcntl is None:
+        yield
+        return
+    fd = os.open(str(state_dir / ".lock"), os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(fd)
 
 
 def _key_for(tool_name, tool_input):
     """Stable correlation key across Pre/Post when no tool_use_id is provided."""
     src = json.dumps({"t": tool_name, "i": tool_input}, sort_keys=True, default=str)
     return hashlib.sha1(src.encode("utf-8")).hexdigest()[:16]
+
+
+def _agent_id(payload):
+    """The subagent a hook fired inside, or "" for the main thread."""
+    aid = payload.get("agent_id")
+    return _safe_name(aid, fallback_prefix="agent") if aid else ""
 
 
 def _parse_ts(s):
@@ -272,10 +385,10 @@ def _parse_ts(s):
         return 0
 
 
-def _sum_usage(transcript_path, since_ns=0, until_ns=0, sidechain_only=False):
-    """Sum token usage across assistant lines in a transcript, optionally
-    filtered by timestamp window and sidechain flag. Returns dict of totals
-    plus a turn count. Silently returns zeros if the file is unreadable."""
+def _sum_usage(transcript_path, since_ns=0):
+    """Sum token usage across assistant lines in a transcript, optionally only
+    lines at or after `since_ns`. Returns dict of totals plus a turn count.
+    Silently returns zeros if the file is unreadable."""
     totals = {
         "input_tokens": 0,
         "output_tokens": 0,
@@ -294,17 +407,17 @@ def _sum_usage(transcript_path, since_ns=0, until_ns=0, sidechain_only=False):
                     continue
                 if d.get("type") != "assistant":
                     continue
-                if sidechain_only and not d.get("isSidechain"):
-                    continue
-                if since_ns or until_ns:
+                if since_ns:
                     ts = _parse_ts(d.get("timestamp"))
-                    if since_ns and ts and ts < since_ns:
-                        continue
-                    if until_ns and ts and ts > until_ns:
+                    if ts and ts < since_ns:
                         continue
                 u = (d.get("message") or {}).get("usage") or {}
-                for k in ("input_tokens", "output_tokens",
-                         "cache_creation_input_tokens", "cache_read_input_tokens"):
+                for k in (
+                    "input_tokens",
+                    "output_tokens",
+                    "cache_creation_input_tokens",
+                    "cache_read_input_tokens",
+                ):
                     totals[k] += int(u.get(k) or 0)
                 totals["turns"] += 1
     except Exception:
@@ -312,97 +425,81 @@ def _sum_usage(transcript_path, since_ns=0, until_ns=0, sidechain_only=False):
     return totals
 
 
-def _find_subagent_transcript(parent_transcript, description, start_ns, end_ns):
-    """Locate the per-subagent transcript file for an Agent tool call.
-
-    Claude Code writes each subagent's turns to:
-        <parent_transcript_without_.jsonl>/subagents/agent-<id>.jsonl
-    with a sibling agent-<id>.meta.json containing {agentType, description}.
-
-    We match by description (Claude Forge sets distinct descriptions per role)
-    and prefer the file whose mtime falls within the call's time window.
-    Returns absolute path or "".
-    """
-    if not parent_transcript or not description:
-        return ""
-    base = parent_transcript[:-6] if parent_transcript.endswith(".jsonl") else parent_transcript
-    sub_dir = Path(base) / "subagents"
-    if not sub_dir.is_dir():
-        return ""
-    # SendMessage anchor names get a "(continued)" suffix from the naming
-    # helper; meta.json descriptions don't have that suffix. Strip it before
-    # matching so SendMessage events resolve back to the same transcript file
-    # the original Agent spawn does.
-    norm_desc = description.removesuffix(" (continued)").strip()
-    # If the "description" we got is actually an agent_id (16-char hex), look
-    # the meta file directly by name instead of scanning for descriptions.
-    if len(norm_desc) >= 12 and all(c in "0123456789abcdef" for c in norm_desc.lower()):
-        direct = sub_dir / f"agent-{norm_desc}.jsonl"
-        if direct.exists():
-            return str(direct)
-    candidates = []
-    try:
-        for meta in sub_dir.glob("agent-*.meta.json"):
-            try:
-                m = json.loads(meta.read_text())
-            except Exception:
-                continue
-            if m.get("description") != norm_desc:
-                continue
-            jsonl = meta.with_name(meta.name.replace(".meta.json", ".jsonl"))
-            if jsonl.exists():
-                candidates.append(jsonl)
-    except Exception:
-        return ""
-    if not candidates:
-        return ""
-    if len(candidates) == 1:
-        return str(candidates[0])
-    # Multiple subagents shared this description (re-runs / multiple phases).
-    # Prefer the one whose mtime sits inside the call window; otherwise newest.
-    in_window = []
-    for c in candidates:
-        try:
-            mtime_ns = int(c.stat().st_mtime * 1_000_000_000)
-        except Exception:
-            continue
-        if (not start_ns or mtime_ns >= start_ns - 60_000_000_000) and \
-           (not end_ns or mtime_ns <= end_ns + 60_000_000_000):
-            in_window.append((mtime_ns, c))
-    if in_window:
-        in_window.sort()
-        return str(in_window[-1][1])
-    return str(max(candidates, key=lambda p: p.stat().st_mtime))
-
-
-def _set_usage_attrs(span, prefix, usage):
-    span.set_attribute(f"{prefix}.input_tokens", usage["input_tokens"])
-    span.set_attribute(f"{prefix}.output_tokens", usage["output_tokens"])
-    span.set_attribute(f"{prefix}.cache_creation_tokens", usage["cache_creation_input_tokens"])
-    span.set_attribute(f"{prefix}.cache_read_tokens", usage["cache_read_input_tokens"])
-    span.set_attribute(f"{prefix}.turns", usage["turns"])
+def _set_usage_attrs(span, usage):
+    """GenAI semconv token attributes, plus Forge's turn count."""
+    span.set_attribute("gen_ai.usage.input_tokens", usage["input_tokens"])
+    span.set_attribute("gen_ai.usage.output_tokens", usage["output_tokens"])
     span.set_attribute(
-        f"{prefix}.total_tokens",
-        usage["input_tokens"] + usage["output_tokens"]
-        + usage["cache_creation_input_tokens"] + usage["cache_read_input_tokens"],
+        "gen_ai.usage.cache_creation.input_tokens", usage["cache_creation_input_tokens"]
     )
+    span.set_attribute("gen_ai.usage.cache_read.input_tokens", usage["cache_read_input_tokens"])
+    span.set_attribute("forge.turns", usage["turns"])
+
+
+def _set_session_usage_attrs(span, usage):
+    for k in (
+        "input_tokens",
+        "output_tokens",
+        "cache_creation_input_tokens",
+        "cache_read_input_tokens",
+        "turns",
+    ):
+        span.set_attribute(f"session.tokens.{k}", usage[k])
+    span.set_attribute(
+        "session.tokens.total_tokens",
+        usage["input_tokens"]
+        + usage["output_tokens"]
+        + usage["cache_creation_input_tokens"]
+        + usage["cache_read_input_tokens"],
+    )
+
+
+def _response_text(resp):
+    """Flatten a tool_response (MCP-style content blocks, Bash stdout/stderr,
+    or a bare string) into text."""
+    if isinstance(resp, str):
+        return resp
+    if not isinstance(resp, dict):
+        return ""
+    content = resp.get("content")
+    if isinstance(content, list):
+        return "\n".join(b.get("text", "") for b in content if isinstance(b, dict))
+    if isinstance(content, str):
+        return content
+    if "stdout" in resp or "stderr" in resp:
+        return "\n".join(x for x in (resp.get("stdout"), resp.get("stderr")) if x)
+    return ""
+
+
+# ---------------- OpenTelemetry ----------------
+
+_OTEL = None
 
 
 def _otel():
+    """Build the tracer once per process, on first use. Events that only record
+    state (every PreToolUse, spawn bookkeeping) never pay for the import."""
+    global _OTEL
+    if _OTEL is not None:
+        return _OTEL
     from opentelemetry import trace
+    from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+    from opentelemetry.sdk.resources import Resource
     from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry.sdk.trace.export import BatchSpanProcessor
-    from opentelemetry.sdk.resources import Resource
-    from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
-    from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
     from opentelemetry.trace import Status, StatusCode
-
-    endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")
-    provider = TracerProvider(resource=Resource(attributes={"service.name": "claude-forge"}))
-    provider.add_span_processor(
-        BatchSpanProcessor(OTLPSpanExporter(endpoint=endpoint, insecure=True, timeout=2))
+    from opentelemetry.trace.propagation.tracecontext import (
+        TraceContextTextMapPropagator,
     )
-    return {
+
+    # Endpoint, headers and TLS come from the standard OTEL_EXPORTER_OTLP_* env
+    # vars; the exporter only goes plaintext for http:// endpoints (or when
+    # OTEL_EXPORTER_OTLP_INSECURE=true), so remote collectors get TLS + auth.
+    provider = TracerProvider(resource=Resource(attributes={"service.name": "claude-forge"}))
+    # Batch so the several spans one event can emit (a result plus security
+    # findings) go out in a single export at the process-end flush.
+    provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(timeout=2)))
+    _OTEL = {
         "trace": trace,
         "provider": provider,
         "tracer": provider.get_tracer("claude-forge.subagents"),
@@ -410,29 +507,27 @@ def _otel():
         "Status": Status,
         "StatusCode": StatusCode,
     }
+    return _OTEL
 
 
-def _safe_flush(otel):
+def _safe_flush():
     """Bounded, exception-safe flush so a slow/unreachable OTLP endpoint can't
-    block tool execution."""
+    hold a hook process open."""
+    if _OTEL is None:
+        return
     try:
-        otel["provider"].force_flush(timeout_millis=FLUSH_TIMEOUT_MS)
+        _OTEL["provider"].force_flush(timeout_millis=FLUSH_TIMEOUT_MS)
     except Exception:
         pass
 
 
-def _read_carrier(state_dir, fname):
-    f = state_dir / fname
-    if not f.exists():
-        return None
-    try:
-        return json.loads(f.read_text())
-    except Exception:
-        return None
+def _ctx(carrier):
+    return _otel()["propagator"].extract(carrier=carrier or {})
 
 
-def _emit_anchor(otel, name, parent_ctx, attrs, start_ns):
+def _emit_anchor(name, parent_ctx, attrs, start_ns):
     """Emit a zero-duration span used purely as a parent for child spans."""
+    otel = _otel()
     span = otel["tracer"].start_span(name, context=parent_ctx, start_time=start_ns)
     for k, v in attrs.items():
         span.set_attribute(k, v)
@@ -442,13 +537,22 @@ def _emit_anchor(otel, name, parent_ctx, attrs, start_ns):
     return carrier
 
 
+def _set_status(span, is_error, msg):
+    otel = _otel()
+    if is_error:
+        span.set_status(otel["Status"](otel["StatusCode"].ERROR, msg))
+    else:
+        span.set_status(otel["Status"](otel["StatusCode"].OK))
+
+
 # ---------------- security helpers ----------------
 
-def _role_of(subagent_type, name):
-    """Resolve a subagent's role from trusted spawn metadata. Prefer
-    `subagent_type` (forge:<role>); fall back to keyword-matching the anchor
-    label for SendMessage continuations that don't carry a subagent_type."""
-    cand = (subagent_type or "").strip().lower()
+
+def _role_of(agent_type, name):
+    """Resolve a subagent's role from trusted metadata. Prefer `agent_type`
+    (forge:<role>, stamped by Claude Code); fall back to keyword-matching the
+    label for agents spawned outside the forge taxonomy."""
+    cand = (agent_type or "").strip().lower()
     if ":" in cand:
         cand = cand.split(":")[-1]
     if cand in _GENERATOR_ROLES or cand in _REVIEWER_ROLES or cand in _ASSESSOR_ROLES:
@@ -466,10 +570,12 @@ def _role_of(subagent_type, name):
     return cand or "unknown"
 
 
-def _parse_subagent_io(sub_jsonl, cap=20000):
+def _parse_subagent_io(sub_jsonl, since_ns=0, cap=20000):
     """From a subagent's JSONL transcript, return (read_texts, bash_commands):
     read_texts are Read/Grep/Glob results (untrusted file content the agent
-    ingested); bash_commands are the commands it ran. Bounded + exception-safe."""
+    ingested); bash_commands are the commands it ran. Only lines at or after
+    `since_ns`, so a resumed agent's earlier segments aren't re-analyzed.
+    Bounded + exception-safe."""
     reads, bash = [], []
     if not sub_jsonl:
         return reads, bash
@@ -484,17 +590,21 @@ def _parse_subagent_io(sub_jsonl, cap=20000):
                     d = json.loads(line)
                 except Exception:
                     continue
+                if since_ns:
+                    ts = _parse_ts(d.get("timestamp"))
+                    if ts and ts < since_ns:
+                        continue
                 msg = d.get("message") or {}
                 t = d.get("type")
                 if t == "assistant":
-                    for c in (msg.get("content") or []):
+                    for c in msg.get("content") or []:
                         if isinstance(c, dict) and c.get("type") == "tool_use":
                             uses[c.get("id") or ""] = {
                                 "name": c.get("name") or "",
                                 "input": c.get("input") or {},
                             }
                 elif t == "user":
-                    for c in (msg.get("content") or []):
+                    for c in msg.get("content") or []:
                         if isinstance(c, dict) and c.get("type") == "tool_result":
                             u = uses.get(c.get("tool_use_id") or "")
                             if not u or u["name"] not in ("Read", "Grep", "Glob"):
@@ -517,7 +627,7 @@ def _parse_subagent_io(sub_jsonl, cap=20000):
 
 
 def _security_state(state_dir):
-    data = _read_carrier(state_dir, "_security.json")
+    data = _read_json(state_dir / "_security.json")
     if not isinstance(data, dict):
         data = {}
     data.setdefault("counts", {})
@@ -529,7 +639,7 @@ def _security_state(state_dir):
 
 def _write_security_state(state_dir, data):
     try:
-        (state_dir / "_security.json").write_text(json.dumps(data))
+        _write_json(state_dir / "_security.json", data)
     except Exception:
         pass
 
@@ -543,20 +653,20 @@ def _record_security_state(state_dir, role, advance, neg):
     _write_security_state(state_dir, data)
 
 
-def _emit_security(otel, parent_carrier, state_dir, dp, kind, severity, agent, detail, ts_ns):
+def _emit_security(parent_carrier, state_dir, dp, kind, severity, agent, detail, ts_ns):
     """Emit a security finding as its own short span (status ERROR for
-    visibility) and tally it for the session summary. Never raises."""
+    visibility) and tally it for the session summary. Never raises.
+    Callers hold _locked(state_dir)."""
     try:
-        parent_ctx = otel["propagator"].extract(carrier=parent_carrier or {})
-        span = otel["tracer"].start_span(
-            f"security:{dp}.{kind}", context=parent_ctx, start_time=ts_ns
+        span = _otel()["tracer"].start_span(
+            f"security:{dp}.{kind}", context=_ctx(parent_carrier), start_time=ts_ns
         )
         span.set_attribute("security.defense_point", dp)
         span.set_attribute("security.kind", kind)
         span.set_attribute("security.severity", severity)
         span.set_attribute("security.agent", agent or "")
         span.set_attribute("security.detail", _truncate(detail, INPUT_LIMIT))
-        span.set_status(otel["Status"](otel["StatusCode"].ERROR, f"{dp}:{kind}"))
+        _set_status(span, True, f"{dp}:{kind}")
         span.end(end_time=ts_ns + 1)
     except Exception:
         pass
@@ -565,25 +675,27 @@ def _emit_security(otel, parent_carrier, state_dir, dp, kind, severity, agent, d
         data["counts"][dp] = data["counts"].get(dp, 0) + 1
         if len(data["findings"]) < 100:
             data["findings"].append(
-                {"dp": dp, "kind": kind, "severity": severity,
-                 "agent": agent, "detail": _truncate(detail, 200)}
+                {
+                    "dp": dp,
+                    "kind": kind,
+                    "severity": severity,
+                    "agent": agent,
+                    "detail": _truncate(detail, 200),
+                }
             )
         _write_security_state(state_dir, data)
     except Exception:
         pass
 
 
-def _security_analyze(otel, state_dir, saved, content, sub_jsonl, ts_ns):
-    """Per-subagent defense-point checks (DP1/DP3/DP4/DP5). Reads the role from
-    trusted spawn metadata, scans the agent's output and the file content it
-    ingested. Detection only; fully exception-guarded."""
+def _security_analyze(state_dir, role, carrier, output, sub_jsonl, since_ns, ts_ns):
+    """Per-run-segment defense-point checks (DP1/DP3/DP4/DP5). `role` comes from
+    Claude Code's agent_type; `output` is what the agent reported. Detection
+    only; fully exception-guarded. Callers hold _locked(state_dir)."""
     if not TRACE_SECURITY:
         return
     try:
-        tool_input = saved.get("tool_input") or {}
-        role = _role_of(tool_input.get("subagent_type"), saved.get("name"))
-        carrier = saved.get("carrier") or {}
-        output = content if isinstance(content, str) else ""
+        output = output if isinstance(output, str) else ""
 
         advance_found = [s for s, rx in _ADVANCE_RES.items() if rx.search(output)]
         neg_found = [s for s, rx in _NEG_SIGNAL_RES.items() if rx.search(output)]
@@ -594,7 +706,12 @@ def _security_analyze(otel, state_dir, saved, content, sub_jsonl, ts_ns):
         # is a forged ballot.
         if advance_found and role not in _REVIEWER_ROLES:
             _emit_security(
-                otel, carrier, state_dir, "dp3", "signal_forgery", "high", role,
+                carrier,
+                state_dir,
+                "dp3",
+                "signal_forgery",
+                "high",
+                role,
                 f"role={role} emitted gate signal {','.join(advance_found)} it cannot cast",
                 ts_ns,
             )
@@ -603,11 +720,17 @@ def _security_analyze(otel, state_dir, saved, content, sub_jsonl, ts_ns):
         m = _AGGREGATOR_RE.search(output)
         if m:
             _emit_security(
-                otel, carrier, state_dir, "dp5", "aggregator_addressed_instruction", "high",
-                role, f"role={role} output directs the orchestrator: {m.group(0)[:120]}", ts_ns,
+                carrier,
+                state_dir,
+                "dp5",
+                "aggregator_addressed_instruction",
+                "high",
+                role,
+                f"role={role} output directs the orchestrator: {m.group(0)[:120]}",
+                ts_ns,
             )
 
-        reads, bash_cmds = _parse_subagent_io(sub_jsonl)
+        reads, bash_cmds = _parse_subagent_io(sub_jsonl, since_ns=since_ns)
 
         # DP1 — injected instructions / forged ballots inside files the agent read.
         flagged_inj = flagged_tok = False
@@ -616,8 +739,13 @@ def _security_analyze(otel, state_dir, saved, content, sub_jsonl, ts_ns):
                 mi = _INJECTION_RE.search(txt)
                 if mi:
                     _emit_security(
-                        otel, carrier, state_dir, "dp1", "injected_instruction", "medium",
-                        role, f"role={role} ingested instruction-like text: {mi.group(0)[:100]}",
+                        carrier,
+                        state_dir,
+                        "dp1",
+                        "injected_instruction",
+                        "medium",
+                        role,
+                        f"role={role} ingested instruction-like text: {mi.group(0)[:100]}",
                         ts_ns,
                     )
                     flagged_inj = True
@@ -625,8 +753,14 @@ def _security_analyze(otel, state_dir, saved, content, sub_jsonl, ts_ns):
                 for s, rx in _ADVANCE_RES.items():
                     if rx.search(txt):
                         _emit_security(
-                            otel, carrier, state_dir, "dp1", "forged_signal_in_input", "high",
-                            role, f"role={role} read input with standalone gate token {s}", ts_ns,
+                            carrier,
+                            state_dir,
+                            "dp1",
+                            "forged_signal_in_input",
+                            "high",
+                            role,
+                            f"role={role} read input with standalone gate token {s}",
+                            ts_ns,
                         )
                         flagged_tok = True
                         break
@@ -637,25 +771,64 @@ def _security_analyze(otel, state_dir, saved, content, sub_jsonl, ts_ns):
         if advance_found and role in _REVIEWER_ROLES:
             if not any(_TEST_CMD_RE.search(c) for c in bash_cmds):
                 _emit_security(
-                    otel, carrier, state_dir, "dp4", "approved_without_tests", "medium",
-                    role, f"role={role} emitted {','.join(advance_found)} with no test/build run",
+                    carrier,
+                    state_dir,
+                    "dp4",
+                    "approved_without_tests",
+                    "medium",
+                    role,
+                    f"role={role} emitted {','.join(advance_found)} with no test/build run",
                     ts_ns,
                 )
         # DP4 — check-defeating commands from any agent.
         for c in bash_cmds:
             if _SUSPICIOUS_CMD_RE.search(c):
                 _emit_security(
-                    otel, carrier, state_dir, "dp4", "suspicious_command", "medium",
-                    role, f"role={role} ran: {c[:140]}", ts_ns,
+                    carrier,
+                    state_dir,
+                    "dp4",
+                    "suspicious_command",
+                    "medium",
+                    role,
+                    f"role={role} ran: {c[:140]}",
+                    ts_ns,
                 )
                 break
     except Exception:
         pass
 
 
-def _security_session_summary(otel, state_dir, root_carrier, span, end_ns):
+def _write_trace_summary(state_dir):
+    """Persist a portable run summary so the Tier C trajectory validators
+    (evaluation/check_run.py) can replay protocol invariants over a real run.
+    Rewritten after every agent run segment, so it is current even when the
+    session never reaches a clean end. Callers hold _locked(state_dir)."""
+    data = _security_state(state_dir)
+    events = []
+    for t in data.get("timeline") or []:
+        role = t.get("role")
+        for sig in (t.get("advance") or []) + (t.get("neg") or []):
+            events.append({"role": role, "signal": sig})
+    try:
+        _write_json(
+            state_dir / "trace-summary.json",
+            {
+                "roles": data.get("roles") or [],
+                "events": events,
+                "security": {
+                    "counts": data.get("counts") or {},
+                    "findings": data.get("findings", []),
+                },
+            },
+        )
+    except Exception:
+        pass
+
+
+def _security_session_summary(state_dir, root_carrier, span, end_ns):
     """Session-level DP2 fan-out precondition + DP5 decision-starvation, then
-    write the per-session security summary onto the session_complete span."""
+    write the per-session security summary onto the session_complete span.
+    Callers hold _locked(state_dir)."""
     if not TRACE_SECURITY:
         return
     try:
@@ -668,9 +841,15 @@ def _security_session_summary(otel, state_dir, root_carrier, span, end_ns):
         assessor_runs = sum(1 for r in roles if r in _ASSESSOR_ROLES)
         if assessor_runs >= 2:
             _emit_security(
-                otel, root_carrier, state_dir, "dp2", "shared_model_fanout", "info", "intake",
+                root_carrier,
+                state_dir,
+                "dp2",
+                "shared_model_fanout",
+                "info",
+                "intake",
                 f"{assessor_runs} read-only assessors fanned out over the same input on the "
-                "shared session model (one injection could transfer to all)", end_ns,
+                "shared session model (one injection could transfer to all)",
+                end_ns,
             )
 
         # DP5 — a reviewer that only ever requested changes (denial of decision).
@@ -682,8 +861,14 @@ def _security_session_summary(otel, state_dir, root_carrier, span, end_ns):
         for r, a in agg.items():
             if r in _REVIEWER_ROLES and a["neg"] >= 3 and a["adv"] == 0:
                 _emit_security(
-                    otel, root_carrier, state_dir, "dp5", "decision_starvation", "low", r,
-                    f"{r} returned {a['neg']} change requests with no approval", end_ns,
+                    root_carrier,
+                    state_dir,
+                    "dp5",
+                    "decision_starvation",
+                    "low",
+                    r,
+                    f"{r} returned {a['neg']} change requests with no approval",
+                    end_ns,
                 )
 
         # Summary (re-read so the DP2/DP5 emits above are counted).
@@ -700,67 +885,54 @@ def _security_session_summary(otel, state_dir, root_carrier, span, end_ns):
                 for t in timeline
             )
             span.set_attribute("forge.security.signal_timeline", _truncate(tl, OUTPUT_LIMIT))
-
-        # Persist a portable run summary so the Tier C trajectory validators
-        # (evaluation/check_run.py) can replay protocol invariants over a real
-        # run, not just synthetic fixtures. Chronological governance events +
-        # the security findings, in one small JSON artifact.
-        events = []
-        for t in timeline:
-            role = t.get("role")
-            for sig in (t.get("advance") or []) + (t.get("neg") or []):
-                events.append({"role": role, "signal": sig})
-        try:
-            (state_dir / "trace-summary.json").write_text(json.dumps({
-                "roles": roles,
-                "events": events,
-                "security": {"counts": counts, "findings": data.get("findings", [])},
-            }))
-        except Exception:
-            pass
+        _write_trace_summary(state_dir)
     except Exception:
         pass
 
 
-# ---------------- handlers ----------------
+# ---------------- session handlers ----------------
 
-def _ensure_root(otel, state_dir, session_id, prompt="", cwd="", transcript_path=""):
-    """Create a root anchor span if one doesn't exist yet for this session.
-    Reuses an existing _root.json so the trace_id stays stable across the
-    whole pipeline. Called from UserPromptSubmit and (defensively) from
-    subagent Pre when no root has been created yet."""
+
+def _ensure_root(state_dir, session_id, prompt="", cwd="", transcript_path=""):
+    """Create the session's root anchor once. Reuses an existing _root.json so
+    the trace_id stays stable across the whole pipeline. Called from
+    UserPromptSubmit (not SessionStart, which carries no prompt to name the
+    trace after) and, defensively, before any agent anchor."""
     root_file = state_dir / "_root.json"
     if root_file.exists():
         return  # already anchored — keep the same trace_id
-    start_ns = time.time_ns()
-    name = f"session: {prompt.splitlines()[0][:80]}" if prompt else f"session: {session_id[:8]}"
-    carrier = _emit_anchor(
-        otel,
-        name,
-        parent_ctx=None,
-        attrs={
-            "session.id": session_id,
-            "session.cwd": cwd,
-            "user.prompt": _truncate(prompt, PROMPT_LIMIT),
-        },
-        start_ns=start_ns,
-    )
-    root_file.write_text(json.dumps({
-        "carrier": carrier,
-        "start_ns": start_ns,
-        "prompt": _truncate(prompt, PROMPT_LIMIT),
-        "cwd": cwd,
-        "transcript_path": transcript_path,
-    }))
+    with _locked(state_dir):
+        if root_file.exists():
+            return
+        start_ns = time.time_ns()
+        name = f"session: {prompt.splitlines()[0][:80]}" if prompt else f"session: {session_id[:8]}"
+        carrier = _emit_anchor(
+            name,
+            parent_ctx=None,
+            attrs={
+                "session.id": session_id,
+                "gen_ai.conversation.id": session_id,
+                "session.cwd": cwd,
+                "user.prompt": _truncate(prompt, PROMPT_LIMIT),
+            },
+            start_ns=start_ns,
+        )
+        _write_json(
+            root_file,
+            {
+                "carrier": carrier,
+                "start_ns": start_ns,
+                "prompt": _truncate(prompt, PROMPT_LIMIT),
+                "cwd": cwd,
+                "transcript_path": transcript_path,
+            },
+        )
     _log(f"root anchor created for session={session_id[:8]} name={name!r}")
 
 
-def _handle_user_prompt(otel, payload, state_dir):
-    # Idempotent: if a root already exists for this session, keep it so the
-    # whole pipeline shares one trace_id. (Some setups fire UserPromptSubmit
-    # for nested prompting; we don't want to fork the trace.)
+def _ensure_root_from(payload, state_dir):
     _ensure_root(
-        otel, state_dir,
+        state_dir,
         session_id=payload.get("session_id") or "default",
         prompt=payload.get("prompt") or "",
         cwd=payload.get("cwd") or "",
@@ -768,514 +940,389 @@ def _handle_user_prompt(otel, payload, state_dir):
     )
 
 
-def _emit_session_complete(otel, payload, state_dir, is_error=False):
+def _root_carrier(state_dir):
+    root = _read_json(state_dir / "_root.json")
+    return (root or {}).get("carrier") or {}
+
+
+def _emit_session_complete(payload, state_dir, is_error=False):
     """Emit the session_complete span. Idempotent: marks `complete_emitted` in
-    _root.json so multiple triggers (Stop fires per-turn, SessionEnd once at
+    _root.json so multiple triggers (Stop per idle turn, SessionEnd once at
     close, StopFailure on API error) collapse to a single span per session."""
-    root = _read_carrier(state_dir, "_root.json")
-    if not root:
+    with _locked(state_dir):
+        root = _read_json(state_dir / "_root.json")
+        if not root:
+            return
+        if root.get("complete_emitted"):
+            # Update error status if a later signal escalates from clean → error.
+            if is_error and not root.get("complete_error"):
+                root["complete_error"] = True
+                try:
+                    _write_json(state_dir / "_root.json", root)
+                except Exception:
+                    pass
+            return
+        end_ns = time.time_ns()
+        start_ns = root.get("start_ns") or end_ns
+        span = _otel()["tracer"].start_span(
+            "session_complete", context=_ctx(root.get("carrier")), start_time=start_ns
+        )
+        span.set_attribute("session.id", payload.get("session_id") or "default")
+        span.set_attribute("session.duration_ms", (end_ns - start_ns) // 1_000_000)
+        span.set_attribute("user.prompt", root.get("prompt", ""))
+        span.set_attribute("session.cwd", root.get("cwd", ""))
+        span.set_attribute("session.is_error", is_error)
+        transcript = payload.get("transcript_path") or root.get("transcript_path") or ""
+        if transcript:
+            span.set_attribute("session.transcript_path", transcript)
+            totals = _sum_usage(transcript)
+            base = transcript.removesuffix(".jsonl")
+            sub_dir = Path(base) / "subagents"
+            if sub_dir.is_dir():
+                for jsonl in sub_dir.glob("agent-*.jsonl"):
+                    u = _sum_usage(str(jsonl))
+                    for k in totals:
+                        totals[k] += u[k]
+            _set_session_usage_attrs(span, totals)
+        _set_status(span, is_error, "session ended in failure")
+        # Session-level defense-in-depth summary (DP2 fan-out, DP5 starvation, counts).
+        _security_session_summary(state_dir, root.get("carrier") or {}, span, end_ns)
+        span.end(end_time=end_ns)
+        # Mark complete; keep _root.json so subagent calls after a Stop can still
+        # parent under the same trace_id. State accumulates in /tmp but the OS reaps it.
+        try:
+            root["complete_emitted"] = True
+            root["complete_error"] = bool(is_error)
+            root["stopped_at_ns"] = end_ns
+            _write_json(state_dir / "_root.json", root)
+        except Exception:
+            pass
+
+
+def _handle_stop(payload, state_dir):
+    """Stop fires at the end of every orchestrator turn — including turns that
+    end while agents are still running in the background. Only a turn with no
+    in-flight background work ends the session."""
+    if payload.get("background_tasks"):
         return
-    if root.get("complete_emitted"):
-        # Update error status if a later signal escalates from clean → error.
-        if is_error and not root.get("complete_error"):
-            root["complete_error"] = True
-            try:
-                (state_dir / "_root.json").write_text(json.dumps(root))
-            except Exception:
-                pass
-        return
-    end_ns = time.time_ns()
-    start_ns = root.get("start_ns") or end_ns
-    parent_ctx = otel["propagator"].extract(carrier=root.get("carrier") or {})
-    span = otel["tracer"].start_span(
-        "session_complete", context=parent_ctx, start_time=start_ns
-    )
-    span.set_attribute("session.id", payload.get("session_id") or "default")
-    span.set_attribute("session.duration_ms", (end_ns - start_ns) // 1_000_000)
-    span.set_attribute("user.prompt", root.get("prompt", ""))
-    span.set_attribute("session.cwd", root.get("cwd", ""))
-    span.set_attribute("session.is_error", is_error)
-    transcript = payload.get("transcript_path") or root.get("transcript_path") or ""
-    if transcript:
-        span.set_attribute("session.transcript_path", transcript)
-        totals = _sum_usage(transcript)
-        base = transcript[:-6] if transcript.endswith(".jsonl") else transcript
-        sub_dir = Path(base) / "subagents"
-        if sub_dir.is_dir():
-            for jsonl in sub_dir.glob("agent-*.jsonl"):
-                u = _sum_usage(str(jsonl))
-                for k in totals:
-                    totals[k] += u[k]
-        _set_usage_attrs(span, "session.tokens", totals)
-    if is_error:
-        span.set_status(otel["Status"](otel["StatusCode"].ERROR, "session ended in failure"))
-    else:
-        span.set_status(otel["Status"](otel["StatusCode"].OK))
-    # Session-level defense-in-depth summary (DP2 fan-out, DP5 starvation, counts).
-    _security_session_summary(otel, state_dir, root.get("carrier") or {}, span, end_ns)
-    span.end(end_time=end_ns)
-    _safe_flush(otel)
-    # Mark complete; keep _root.json so subagent calls after a Stop can still
-    # parent under the same trace_id. State accumulates in /tmp but the OS reaps it.
-    try:
-        root["complete_emitted"] = True
-        root["complete_error"] = bool(is_error)
-        root["stopped_at_ns"] = end_ns
-        (state_dir / "_root.json").write_text(json.dumps(root))
-    except Exception:
-        pass
+    _emit_session_complete(payload, state_dir)
 
 
-def _handle_stop(otel, payload, state_dir):
-    """Stop fires after every Claude turn — defer to the idempotent emitter,
-    which only fires session_complete once per session."""
-    _emit_session_complete(otel, payload, state_dir)
+def _parent_ctx(state_dir, agent_id=""):
+    """The agent's anchor when the event fired inside a subagent, else the
+    session root, else None."""
+    if agent_id:
+        state = _read_json(state_dir / f"agent_{agent_id}.json")
+        if state and state.get("carrier"):
+            return _ctx(state["carrier"])
+    carrier = _root_carrier(state_dir)
+    return _ctx(carrier) if carrier else None
 
 
-def _handle_session_end(otel, payload, state_dir):
-    """SessionEnd is the canonical end-of-session signal."""
-    _emit_session_complete(otel, payload, state_dir)
-
-
-def _handle_stop_failure(otel, payload, state_dir):
-    """StopFailure: turn ended due to API error. Mark session_complete as error."""
-    _emit_session_complete(otel, payload, state_dir, is_error=True)
-
-
-def _handle_session_start(otel, payload, state_dir):
-    """SessionStart is the cleanest root-anchor trigger. UserPromptSubmit also
-    creates the root defensively (idempotent), so resumed sessions still anchor
-    correctly even if SessionStart didn't fire."""
-    _ensure_root(
-        otel, state_dir,
-        session_id=payload.get("session_id") or "default",
-        prompt=payload.get("prompt") or "",
-        cwd=payload.get("cwd") or "",
-        transcript_path=payload.get("transcript_path") or "",
-    )
-
-
-def _parent_ctx(otel, state_dir):
-    """Pick the most appropriate parent context: active subagent if one is
-    running, else the session root, else None."""
-    cur = _read_carrier(state_dir, "_current_agent.json")
-    if cur and cur.get("carrier"):
-        return otel["propagator"].extract(carrier=cur["carrier"])
-    root = _read_carrier(state_dir, "_root.json")
-    if root and root.get("carrier"):
-        return otel["propagator"].extract(carrier=root["carrier"])
-    return None
-
-
-def _handle_permission(otel, payload, state_dir, denied):
+def _handle_permission(payload, state_dir, denied):
     """Emit a span for permission events so Jaeger shows when a tool was asked
-    to be approved or was blocked. Parents to the active subagent if any."""
-    parent_ctx = _parent_ctx(otel, state_dir)
+    to be approved or was blocked, under the agent that asked."""
+    parent_ctx = _parent_ctx(state_dir, _agent_id(payload))
     if parent_ctx is None:
         return
     now_ns = time.time_ns()
-    tool = payload.get("tool_name") or payload.get("toolName") or "?"
+    tool = payload.get("tool_name") or "?"
     op = "permission_denied" if denied else "permission_requested"
-    span = otel["tracer"].start_span(f"{op}:{tool}", context=parent_ctx, start_time=now_ns)
+    span = _otel()["tracer"].start_span(f"{op}:{tool}", context=parent_ctx, start_time=now_ns)
     span.set_attribute("permission.tool", tool)
     span.set_attribute("permission.denied", denied)
     reason = payload.get("reason") or payload.get("message") or ""
     if reason:
         span.set_attribute("permission.reason", _truncate(reason, INPUT_LIMIT))
     if denied:
-        span.set_status(otel["Status"](otel["StatusCode"].ERROR, "permission denied"))
+        _set_status(span, True, "permission denied")
     span.end(end_time=now_ns + 1)
-    _safe_flush(otel)
 
 
-def _handle_pre_compact(otel, payload, state_dir):
+def _handle_pre_compact(payload, state_dir):
     """Stash compaction start time; PostCompact emits the span."""
     try:
-        (state_dir / "_compaction.json").write_text(json.dumps({"start_ns": time.time_ns()}))
+        _write_json(state_dir / "_compaction.json", {"start_ns": time.time_ns()})
     except Exception:
         pass
 
 
-def _handle_post_compact(otel, payload, state_dir):
+def _handle_post_compact(payload, state_dir):
     f = state_dir / "_compaction.json"
     end_ns = time.time_ns()
-    start_ns = end_ns
-    if f.exists():
-        try:
-            d = json.loads(f.read_text())
-            start_ns = d.get("start_ns") or end_ns
-        except Exception:
-            pass
-    parent_ctx = _parent_ctx(otel, state_dir)
+    start_ns = ((_read_json(f) or {}).get("start_ns")) or end_ns
+    parent_ctx = _parent_ctx(state_dir, _agent_id(payload))
     if parent_ctx is None:
         return
-    span = otel["tracer"].start_span("compaction", context=parent_ctx, start_time=start_ns)
+    span = _otel()["tracer"].start_span("compaction", context=parent_ctx, start_time=start_ns)
     span.set_attribute("compaction.duration_ms", (end_ns - start_ns) // 1_000_000)
     span.end(end_time=end_ns)
-    _safe_flush(otel)
-    try:
-        f.unlink()
-    except Exception:
-        pass
+    _unlink(f)
 
 
-def _handle_instructions_loaded(otel, payload, state_dir):
+def _handle_instructions_loaded(payload, state_dir):
     """Annotate the trace when CLAUDE.md or rule files load — useful when an
     instruction file shapes agent behavior unexpectedly."""
-    parent_ctx = _parent_ctx(otel, state_dir)
+    parent_ctx = _parent_ctx(state_dir, _agent_id(payload))
     if parent_ctx is None:
         return
     now_ns = time.time_ns()
-    path = (
-        payload.get("path") or payload.get("file_path")
-        or payload.get("instructionFile") or payload.get("file") or "?"
-    )
-    inst_type = payload.get("type") or payload.get("instructionType") or ""
-    span = otel["tracer"].start_span(
+    path = payload.get("file_path") or payload.get("path") or "?"
+    inst_type = payload.get("memory_type") or payload.get("type") or ""
+    span = _otel()["tracer"].start_span(
         "instructions.loaded", context=parent_ctx, start_time=now_ns
     )
     span.set_attribute("instructions.path", str(path))
     if inst_type:
         span.set_attribute("instructions.type", str(inst_type))
     span.end(end_time=now_ns + 1)
-    _safe_flush(otel)
 
 
-def _lookup_agent_id_in_meta(transcript_path, agent_id):
-    """Resolve an agent_id to its description by reading the per-subagent
-    meta.json that Claude Code writes alongside each subagent's transcript:
-        <session>/subagents/agent-<id>.meta.json
-    Returns description string or "" on miss.
-    """
-    if not transcript_path or not agent_id:
-        return ""
-    base = transcript_path[:-6] if transcript_path.endswith(".jsonl") else transcript_path
-    meta = Path(base) / "subagents" / f"agent-{agent_id}.meta.json"
-    if not meta.exists():
-        return ""
-    try:
-        d = json.loads(meta.read_text())
-        return d.get("description") or ""
-    except Exception:
-        return ""
+# ---------------- agent handlers ----------------
+# Lifecycle, as observed from Claude Code with Agent Teams on:
+#   PreToolUse Agent → PostToolUse Agent {status: async_launched, agentId}
+#   → SubagentStart {agent_id} → tool events carrying agent_id
+#   → SubagentStop {agent_id, agent_transcript_path, last_assistant_message}
+# and on each orchestrator SendMessage to that agent:
+#   PostToolUse SendMessage {resumedAgentId} → SubagentStart (same agent_id)
+#   → ... → SubagentStop.
+# Each SubagentStart opens a run segment; each SubagentStop closes the oldest
+# open one, so segment accounting holds even when async Stop hooks run late.
 
 
-def _agent_name_from_payload(tool_input, tool_name, state_dir, transcript_path=""):
-    """Pick the most descriptive label for a span.
-
-    - Agent payloads have a `description` ("Planner: unified audit remediation
-      plan") and `name` ("planner"). Prefer description.
-    - SendMessage payloads have `to` (role-name OR agent-id) and `summary`.
-      Resolution order: saved name map → meta.json on disk (for agent-ids) →
-      fall back to the raw `to` value.
-    """
-    if tool_name == "SendMessage":
-        to = (tool_input.get("to") or tool_input.get("recipient") or "").strip()
-        if to:
-            mapped = _read_carrier(state_dir, "_agent_names.json") or {}
-            name = mapped.get(to) or mapped.get(to.lower())
-            if name:
-                return f"{name} (continued)"
-            # Agent-id form ("a987f5c0d71bc551c") — agent_ids aren't in the
-            # Agent tool's response, so the saved name map only has role
-            # entries. Fall back to the per-subagent meta.json that Claude
-            # Code writes alongside each subagent's transcript.
-            desc = _lookup_agent_id_in_meta(transcript_path, to)
-            if desc:
-                # Cache for next time so subsequent SendMessages by the same
-                # id don't re-read the file.
-                try:
-                    f = state_dir / "_agent_names.json"
-                    cur = json.loads(f.read_text()) if f.exists() else {}
-                    cur[to] = desc
-                    f.write_text(json.dumps(cur))
-                except Exception:
-                    pass
-                return f"{desc} (continued)"
-            return to + " (continued)"
-        return tool_input.get("summary") or "send_message"
-    return (
-        tool_input.get("description")
-        or tool_input.get("subagent_type")
-        or "subagent"
+def _record_spawn(payload, state_dir, tool_use_id):
+    """Main-thread PreToolUse Agent: remember what the orchestrator asked for,
+    so the agent's anchor can carry its name and prompt."""
+    ti = payload.get("tool_input") or {}
+    _write_json(
+        state_dir / f"spawn_{tool_use_id}.json",
+        {
+            "name": ti.get("name") or "",
+            "description": ti.get("description") or "",
+            "subagent_type": ti.get("subagent_type") or "general-purpose",
+            "prompt": _truncate(ti.get("prompt") or "", PROMPT_LIMIT),
+            "ts": time.time_ns(),
+        },
     )
 
 
-def _record_agent_name(state_dir, tool_input):
-    """Save name+description+id mappings so future SendMessage Pre events can
-    resolve `to=<role>` or `to=<agent_id>` back to a friendly name."""
-    f = state_dir / "_agent_names.json"
-    try:
-        existing = json.loads(f.read_text()) if f.exists() else {}
-    except Exception:
-        existing = {}
-    desc = tool_input.get("description") or ""
-    role = tool_input.get("name") or ""
-    if desc and role:
-        existing[role] = desc
-        existing[role.lower()] = desc
-    f.write_text(json.dumps(existing))
+def _bind_spawn(payload, state_dir, tool_use_id):
+    """Main-thread PostToolUse Agent: the launch receipt carries the agentId.
+    Bind the spawn metadata to it, and the agent's name to its id."""
+    resp = payload.get("tool_response")
+    aid = resp.get("agentId") if isinstance(resp, dict) else None
+    if not aid:
+        return
+    aid = _safe_name(aid, fallback_prefix="agent")
+    name = (payload.get("tool_input") or {}).get("name") or ""
+    with _locked(state_dir):
+        if name:
+            names = _read_json(state_dir / "_agent_names.json") or {}
+            names[name] = aid
+            _write_json(state_dir / "_agent_names.json", names)
+        src = state_dir / f"spawn_{tool_use_id}.json"
+        if src.exists():  # SubagentStart may already have claimed it by type
+            os.replace(src, state_dir / f"spawnmeta_{aid}.json")
 
 
-def _handle_subagent_pre(otel, payload, state_dir, tool_use_id):
-    """Emit an anchor span for the subagent so child tool calls have a parent.
-    Save the anchor's carrier for child lookup, plus start time + input for the
-    real-duration result span emitted at Post."""
-    tool_input = payload.get("tool_input") or {}
-    tool_name = payload.get("tool_name") or ""
-    # Save role-name → description so SendMessage Pre can resolve to that.
-    if tool_name == "Agent":
-        _record_agent_name(state_dir, tool_input)
-    name = _agent_name_from_payload(
-        tool_input, tool_name, state_dir,
-        transcript_path=payload.get("transcript_path") or "",
-    )
-    start_ns = time.time_ns()
-    # Defensive: if UserPromptSubmit didn't fire (or fired with a different
-    # session_id), create a root anchor now so this subagent — and all that
-    # follow — share one trace instead of becoming separate root traces.
-    _ensure_root(
-        otel, state_dir,
-        session_id=payload.get("session_id") or "default",
-        cwd=payload.get("cwd") or "",
-        transcript_path=payload.get("transcript_path") or "",
-    )
-    root = _read_carrier(state_dir, "_root.json")
-    parent_ctx = (
-        otel["propagator"].extract(carrier=root.get("carrier") or {}) if root else None
-    )
-    # Build attrs that work for both Agent (description/prompt) and
-    # SendMessage (to/summary/message) payload shapes.
-    attrs = {
-        "agent.subagent_type": tool_input.get("subagent_type", ""),
-        "agent.description": tool_input.get("description", ""),
-        "agent.name": tool_input.get("name", ""),
-        "agent.tool_name": tool_name,
-        "session.id": payload.get("session_id") or "default",
-    }
-    if tool_name == "SendMessage":
-        attrs["sendmessage.to"] = tool_input.get("to") or tool_input.get("recipient", "")
-        attrs["sendmessage.summary"] = tool_input.get("summary", "")
-        attrs["agent.prompt"] = _truncate(
-            tool_input.get("message") or tool_input.get("content") or "", PROMPT_LIMIT
-        )
-    else:
-        attrs["agent.prompt"] = _truncate(tool_input.get("prompt") or "", PROMPT_LIMIT)
+def _take_spawn_meta(state_dir, aid, agent_type):
+    """Spawn metadata for a starting agent: the exact agentId binding if the
+    launch receipt was seen, else the oldest unclaimed spawn of that type.
+    Callers hold _locked(state_dir)."""
+    exact = state_dir / f"spawnmeta_{aid}.json"
+    meta = _read_json(exact)
+    if meta:
+        _unlink(exact)
+        return meta
+    pending = []
+    for f in state_dir.glob("spawn_*.json"):
+        m = _read_json(f)
+        if m and m.get("subagent_type") == (agent_type or "general-purpose"):
+            pending.append((m.get("ts") or 0, str(f), m))
+    if not pending:
+        return {}
+    pending.sort()
+    _unlink(Path(pending[0][1]))
+    return pending[0][2]
+
+
+def _open_agent(payload, state_dir, aid, now_ns):
+    """Create the agent's anchor span and state. Callers hold _locked(state_dir)
+    and have checked no state exists, so one agent_id never gets two anchors."""
+    agent_type = payload.get("agent_type") or ""
+    meta = _take_spawn_meta(state_dir, aid, agent_type)
+    label = meta.get("description") or meta.get("name") or agent_type or "subagent"
+    role = _role_of(agent_type, meta.get("name") or label)
+    session_id = payload.get("session_id") or "default"
+    root = _root_carrier(state_dir)
     carrier = _emit_anchor(
-        otel,
-        f"subagent:{name}",
-        parent_ctx=parent_ctx,
-        attrs=attrs,
-        start_ns=start_ns,
+        f"subagent:{label}",
+        parent_ctx=_ctx(root) if root else None,
+        attrs={
+            "gen_ai.agent.id": aid,
+            "gen_ai.agent.name": meta.get("name") or agent_type or label,
+            "gen_ai.agent.description": meta.get("description") or "",
+            "gen_ai.conversation.id": session_id,
+            "agent.subagent_type": agent_type,
+            "agent.prompt": meta.get("prompt") or "",
+            "forge.role": role,
+        },
+        start_ns=now_ns,
     )
     state = {
         "carrier": carrier,
-        "name": name,
-        "start_ns": start_ns,
-        "tool_input": tool_input,
-        "tool_name": payload.get("tool_name") or "",
-        "transcript_path": payload.get("transcript_path") or "",
+        "label": label,
+        "name": meta.get("name") or "",
+        "role": role,
+        "agent_type": agent_type,
+        "segments": [now_ns],
+        "closed": 0,
     }
-    (state_dir / f"agent_{tool_use_id}.json").write_text(json.dumps(state))
-    # _current_agent.json is single-writer because Claude Forge's
-    # pipeline-protocol.md mandates strictly sequential subagent spawning
-    # ("NO parallel agents"). If a future flow ever runs subagents concurrently,
-    # inner-tool spans here could parent to the wrong subagent — switch to a
-    # per-invocation key + skip-on-ambiguity at that point.
-    (state_dir / "_current_agent.json").write_text(json.dumps(state))
-    _safe_flush(otel)
+    _write_json(state_dir / f"agent_{aid}.json", state)
+    return state
 
 
-def _emit_subagent_inner_spans(otel, transcript_path, parent_carrier, agent_name,
-                               anchor_start_ns, anchor_end_ns):
-    """Synthesize tool:<name> spans from a subagent's per-agent JSONL transcript.
-
-    Workaround for Claude Code issue #34692 (subagent tool calls don't fire
-    the parent's PreToolUse/PostToolUse hooks). The subagent's own transcript
-    records every tool_use + tool_result with timestamps; we walk it after
-    the subagent finishes and emit retroactive spans parented to the subagent
-    anchor so the trace tree shows what each subagent actually did.
-
-    Honors the same gates as live inner-tool tracing (_should_trace_inner):
-    mutational tools (Write/Edit/MultiEdit/Bash) by default, others require
-    CLAUDE_FORGE_TRACE_INNER=1, INNER_TOOL_BLOCKLIST drops Read/Glob/Grep/etc.
-    """
-    if not transcript_path:
+def _handle_subagent_start(payload, state_dir):
+    aid = _agent_id(payload)
+    if not aid:
         return
-    p = Path(transcript_path)
-    if not p.exists():
-        return
+    now_ns = time.time_ns()
+    _ensure_root_from(payload, state_dir)
+    with _locked(state_dir):
+        sf = state_dir / f"agent_{aid}.json"
+        state = _read_json(sf)
+        if state:  # resumed by SendMessage: same anchor, new run segment
+            state["segments"].append(now_ns)
+            _write_json(sf, state)
+            return
+        _open_agent(payload, state_dir, aid, now_ns)
 
-    parent_ctx = otel["propagator"].extract(carrier=parent_carrier or {})
-    tool_uses = {}      # tool_use_id -> {name, input, ts_ns}
-    tool_results = {}   # tool_use_id -> {content, is_error, ts_ns}
 
+def _agent_state(payload, state_dir, aid):
+    """State for an agent, creating its anchor if SubagentStart was missed
+    (e.g. tracing enabled mid-run)."""
+    sf = state_dir / f"agent_{aid}.json"
+    state = _read_json(sf)
+    if state:
+        return state
+    _ensure_root_from(payload, state_dir)
+    with _locked(state_dir):
+        state = _read_json(sf)
+        if state:
+            return state
+        return _open_agent(payload, state_dir, aid, time.time_ns())
+
+
+def _reports_since(state_dir, aid, since_ns):
+    reports = []
     try:
-        with p.open() as f:
+        with open(state_dir / f"reports_{aid}.jsonl") as f:
             for line in f:
                 try:
-                    d = json.loads(line)
+                    r = json.loads(line)
                 except Exception:
                     continue
-                ts_ns = _parse_ts(d.get("timestamp"))
-                msg = d.get("message") or {}
-                if d.get("type") == "assistant":
-                    for c in (msg.get("content") or []):
-                        if isinstance(c, dict) and c.get("type") == "tool_use":
-                            tid = c.get("id") or ""
-                            if tid:
-                                tool_uses[tid] = {
-                                    "name": c.get("name") or "?",
-                                    "input": c.get("input") or {},
-                                    "ts_ns": ts_ns,
-                                }
-                elif d.get("type") == "user":
-                    for c in (msg.get("content") or []):
-                        if isinstance(c, dict) and c.get("type") == "tool_result":
-                            tid = c.get("tool_use_id") or ""
-                            if tid:
-                                tool_results[tid] = {
-                                    "content": c.get("content"),
-                                    "is_error": bool(c.get("is_error")),
-                                    "ts_ns": ts_ns,
-                                }
+                if (r.get("ts") or 0) >= since_ns and isinstance(r.get("message"), str):
+                    reports.append(r["message"])
     except Exception:
+        pass
+    return reports
+
+
+def _handle_subagent_stop(payload, state_dir):
+    aid = _agent_id(payload)
+    if not aid:
         return
-
-    # Skip tool_uses with timestamps before anchor_start_ns. This matters for
-    # SendMessage continuations: the same per-subagent transcript is shared
-    # across the original Agent spawn + every SendMessage to that agent. Each
-    # post-event runs synth and we'd re-emit the same spans without this guard.
-    # anchor_start_ns is the SendMessage's Pre time, so only tool_uses that
-    # happened during this SendMessage window get emitted.
-    emitted = 0
-    for tid, use in tool_uses.items():
-        tool_name = use["name"]
-        if not _should_trace_inner(tool_name):
-            continue
-        result = tool_results.get(tid, {})
-        start_ns = use.get("ts_ns") or anchor_start_ns
-        end_ns = result.get("ts_ns") or anchor_end_ns
-        if not end_ns or end_ns < start_ns:
-            end_ns = start_ns + 1
-        # Only emit tool spans that fall within this anchor's window
-        if anchor_start_ns and start_ns < anchor_start_ns:
-            continue
-
-        span = otel["tracer"].start_span(
-            f"tool:{tool_name}", context=parent_ctx, start_time=start_ns
-        )
-        span.set_attribute("tool.name", tool_name)
-        span.set_attribute("tool.duration_ms", (end_ns - start_ns) // 1_000_000)
-        span.set_attribute("agent.name", agent_name or "")
-        try:
-            span.set_attribute(
-                "tool.input",
-                _truncate(json.dumps(use.get("input") or {}, default=str), INPUT_LIMIT),
-            )
-        except Exception:
-            pass
-        is_error = bool(result.get("is_error"))
-        span.set_attribute("tool.is_error", is_error)
-        content = result.get("content")
-        if isinstance(content, list):
-            content = "\n".join(b.get("text", "") for b in content if isinstance(b, dict))
-        if isinstance(content, str):
-            span.set_attribute("tool.output", _truncate(content, OUTPUT_LIMIT))
-        if is_error:
-            span.set_status(otel["Status"](otel["StatusCode"].ERROR, "tool reported error"))
-        span.end(end_time=end_ns)
-        emitted += 1
-
-    if emitted:
-        _safe_flush(otel)
-
-
-def _handle_subagent_post(otel, payload, state_dir, tool_use_id):
-    state_file = state_dir / f"agent_{tool_use_id}.json"
-    if not state_file.exists():
-        return
-    saved = json.loads(state_file.read_text())
     end_ns = time.time_ns()
-    start_ns = saved.get("start_ns") or end_ns
-    parent_ctx = otel["propagator"].extract(carrier=saved.get("carrier") or {})
+    _agent_state(payload, state_dir, aid)
+    with _locked(state_dir):
+        sf = state_dir / f"agent_{aid}.json"
+        state = _read_json(sf) or {}
+        segments = state.get("segments") or [end_ns]
+        idx = min(state.get("closed", 0), len(segments) - 1)
+        seg_start = segments[idx]
+        state["closed"] = idx + 1
+        _write_json(sf, state)
 
-    name = saved.get("name") or "subagent"
-    span = otel["tracer"].start_span(
-        f"subagent_result:{name}", context=parent_ctx, start_time=start_ns
-    )
-    span.set_attribute("agent.duration_ms", (end_ns - start_ns) // 1_000_000)
-    tool_response = payload.get("tool_response") or {}
-    is_error = bool(tool_response.get("isError") or tool_response.get("is_error"))
-    span.set_attribute("agent.is_error", is_error)
-    content = tool_response.get("content")
-    if isinstance(content, list):
-        content = "\n".join(b.get("text", "") for b in content if isinstance(b, dict))
-    if isinstance(content, str):
-        span.set_attribute("agent.output", _truncate(content, OUTPUT_LIMIT))
-    if is_error:
-        span.set_status(otel["Status"](otel["StatusCode"].ERROR, "subagent reported error"))
-    else:
-        span.set_status(otel["Status"](otel["StatusCode"].OK))
+    label = state.get("label") or "subagent"
+    role = state.get("role") or "unknown"
+    carrier = state.get("carrier") or {}
+    # The agent's report is its SendMessage(to="main"); plain text never reaches
+    # the orchestrator. Fall back to the last message only for the span output.
+    reports = _reports_since(state_dir, aid, seg_start)
+    output = "\n\n".join(reports) or (payload.get("last_assistant_message") or "")
 
-    transcript = (
-        payload.get("transcript_path")
-        or saved.get("transcript_path")
-        or ""
+    span = _otel()["tracer"].start_span(
+        f"subagent_result:{label}", context=_ctx(carrier), start_time=seg_start
     )
-    sub_jsonl = ""
+    span.set_attribute("gen_ai.operation.name", "invoke_agent")
+    span.set_attribute("gen_ai.agent.id", aid)
+    span.set_attribute("gen_ai.agent.name", state.get("name") or state.get("agent_type") or label)
+    span.set_attribute("gen_ai.conversation.id", payload.get("session_id") or "default")
+    span.set_attribute("forge.role", role)
+    span.set_attribute("agent.segment", idx + 1)
+    span.set_attribute("agent.duration_ms", (end_ns - seg_start) // 1_000_000)
+    span.set_attribute("agent.output", _truncate(output, OUTPUT_LIMIT))
+    # An agent that stops without SendMessage(to="main") leaves the orchestrator
+    # with a bare idle notification — the failure mode the protocol warns about.
+    span.set_attribute("agent.reported", bool(reports))
+    transcript = payload.get("agent_transcript_path") or ""
     if transcript:
-        # Each subagent has its own JSONL under <session>/subagents/. Locate it
-        # by matching description, then sum its assistant usage. Falls back to
-        # the parent transcript's window if the subagent file isn't found.
-        sub_jsonl = _find_subagent_transcript(
-            transcript, saved.get("name") or "", start_ns, end_ns
-        )
-        if sub_jsonl:
-            usage = _sum_usage(sub_jsonl)
-            span.set_attribute("agent.subagent_transcript", sub_jsonl)
-        else:
-            usage = _sum_usage(transcript, since_ns=start_ns, until_ns=end_ns)
-        _set_usage_attrs(span, "agent.tokens", usage)
-
+        span.set_attribute("agent.transcript_path", transcript)
+        _set_usage_attrs(span, _sum_usage(transcript, since_ns=seg_start))
+    _set_status(span, False, "")
     span.end(end_time=end_ns)
-
-    # After the result span is sealed, retroactively emit tool:<name> spans
-    # for every tool the subagent invoked internally — Claude Code's hook
-    # subsystem doesn't fire for subagent tools (issues #34692/#18392), so
-    # we synthesize them from the subagent's own JSONL transcript.
-    if sub_jsonl:
-        _emit_subagent_inner_spans(
-            otel,
-            transcript_path=sub_jsonl,
-            parent_carrier=saved.get("carrier") or {},
-            agent_name=saved.get("name") or "",
-            anchor_start_ns=start_ns,
-            anchor_end_ns=end_ns,
-        )
 
     # Passive defense-in-depth pass: provenance, injected input, approve-without-
     # tests, aggregator-directed instructions. Detection only; never blocks.
-    if TRACE_SECURITY:
-        _security_analyze(otel, state_dir, saved, content, sub_jsonl, end_ns)
-
-    _safe_flush(otel)
-
-    try:
-        state_file.unlink()
-    except Exception:
-        pass
-    cur = state_dir / "_current_agent.json"
-    try:
-        if cur.exists():
-            data = json.loads(cur.read_text())
-            if data.get("carrier") == saved.get("carrier"):
-                cur.unlink()
-    except Exception:
-        pass
+    with _locked(state_dir):
+        _security_analyze(
+            state_dir,
+            role,
+            carrier,
+            "\n\n".join(reports) or output,
+            transcript,
+            seg_start,
+            end_ns,
+        )
+        _write_trace_summary(state_dir)
 
 
-def _should_trace_inner(tool_name):
+def _handle_orchestrator_message(payload, state_dir):
+    """Main-thread SendMessage: the orchestrator continuing an agent. Parent the
+    span to that agent (the receipt names the resumed agentId)."""
+    ti = payload.get("tool_input") or {}
+    to = (ti.get("to") or "").strip()
+    resp = payload.get("tool_response")
+    aid = resp.get("resumedAgentId") if isinstance(resp, dict) else None
+    if not aid and to:
+        aid = (_read_json(state_dir / "_agent_names.json") or {}).get(to)
+    aid = _safe_name(aid, fallback_prefix="agent") if aid else ""
+    state = _read_json(state_dir / f"agent_{aid}.json") if aid else None
+    carrier = (state or {}).get("carrier") or _root_carrier(state_dir)
+    if not carrier:
+        return
+    now_ns = time.time_ns()
+    label = (state or {}).get("label") or to or "agent"
+    span = _otel()["tracer"].start_span(
+        f"message:{label}", context=_ctx(carrier), start_time=now_ns
+    )
+    span.set_attribute("sendmessage.to", to)
+    span.set_attribute("sendmessage.summary", ti.get("summary") or "")
+    msg = ti.get("message")
+    span.set_attribute(
+        "agent.prompt",
+        _truncate(msg if isinstance(msg, str) else json.dumps(msg, default=str), PROMPT_LIMIT),
+    )
+    if aid:
+        span.set_attribute("gen_ai.agent.id", aid)
+    span.end(end_time=now_ns + 1)
+
+
+# ---------------- tool handlers ----------------
+
+
+def _should_trace_tool(tool_name):
     """Mutational tools trace by default; everything else needs TRACE_INNER=1
     and isn't in the blocklist."""
     if tool_name in MUTATION_TOOLS:
@@ -1283,47 +1330,67 @@ def _should_trace_inner(tool_name):
     return TRACE_INNER and tool_name not in INNER_TOOL_BLOCKLIST
 
 
-def _handle_inner_pre(payload, state_dir, key):
-    """Record start time + input for a non-subagent tool call happening inside
-    an active subagent. No-op if the tool isn't being traced or there's no
-    active agent."""
-    if not _should_trace_inner(payload.get("tool_name") or ""):
+def _handle_tool_pre(payload, state_dir, tool_use_id):
+    """State only — never imports OpenTelemetry, so the synchronous PreToolUse
+    hook stays cheap."""
+    tool_name = payload.get("tool_name") or ""
+    ti = payload.get("tool_input") or {}
+    aid = _agent_id(payload)
+    if not aid and tool_name == "Agent":
+        _record_spawn(payload, state_dir, tool_use_id)
         return
-    if not (state_dir / "_current_agent.json").exists():
+    if aid and tool_name == "SendMessage" and (ti.get("to") or "").strip() == "main":
+        msg = ti.get("message")
+        _append_jsonl(
+            state_dir / f"reports_{aid}.jsonl",
+            {
+                "ts": time.time_ns(),
+                "message": msg if isinstance(msg, str) else json.dumps(msg, default=str),
+            },
+        )
+    if not aid and tool_name == "SendMessage":
+        return  # handled at PostToolUse, where the receipt names the agent
+    if not _should_trace_tool(tool_name):
         return
-    tool_input = payload.get("tool_input") or {}
-    (state_dir / f"tool_{key}.json").write_text(json.dumps({
-        "start_ns": time.time_ns(),
-        "tool_name": payload.get("tool_name") or "",
-        "tool_input": tool_input,
-    }))
+    _write_json(
+        state_dir / f"tool_{tool_use_id}.json",
+        {
+            "start_ns": time.time_ns(),
+            "tool_name": tool_name,
+            "tool_input": ti,
+            "agent_id": aid,
+        },
+    )
 
 
-def _handle_inner_post(otel, payload, state_dir, key):
-    if not _should_trace_inner(payload.get("tool_name") or ""):
+def _handle_tool_post(payload, state_dir, tool_use_id, is_failure):
+    tool_name = payload.get("tool_name") or ""
+    aid = _agent_id(payload)
+    if not aid and tool_name == "Agent":
+        _bind_spawn(payload, state_dir, tool_use_id)
         return
-    state_file = state_dir / f"tool_{key}.json"
-    if not state_file.exists():
+    if not aid and tool_name == "SendMessage":
+        _handle_orchestrator_message(payload, state_dir)
         return
-    cur = _read_carrier(state_dir, "_current_agent.json")
-    if not cur:
-        try: state_file.unlink()
-        except Exception: pass
+    sf = state_dir / f"tool_{tool_use_id}.json"
+    saved = _read_json(sf)
+    if not saved:
         return
-    try:
-        saved = json.loads(state_file.read_text())
-    except Exception:
-        return
+    _unlink(sf)
     end_ns = time.time_ns()
     start_ns = saved.get("start_ns") or end_ns
-    parent_ctx = otel["propagator"].extract(carrier=cur.get("carrier") or {})
-    tool_name = saved.get("tool_name") or "tool"
-    span = otel["tracer"].start_span(
+    if aid:
+        _agent_state(payload, state_dir, aid)
+    parent_ctx = _parent_ctx(state_dir, aid)
+    span = _otel()["tracer"].start_span(
         f"tool:{tool_name}", context=parent_ctx, start_time=start_ns
     )
-    span.set_attribute("tool.name", tool_name)
+    span.set_attribute("gen_ai.operation.name", "execute_tool")
+    span.set_attribute("gen_ai.tool.name", tool_name)
+    span.set_attribute("gen_ai.tool.call.id", payload.get("tool_use_id") or "")
+    if aid:
+        span.set_attribute("gen_ai.agent.id", aid)
     span.set_attribute("tool.duration_ms", (end_ns - start_ns) // 1_000_000)
-    span.set_attribute("agent.name", cur.get("name", ""))
     try:
         span.set_attribute(
             "tool.input",
@@ -1331,25 +1398,35 @@ def _handle_inner_post(otel, payload, state_dir, key):
         )
     except Exception:
         pass
-    tool_response = payload.get("tool_response") or {}
-    is_error = bool(tool_response.get("isError") or tool_response.get("is_error"))
+    resp = payload.get("tool_response")
+    is_error = is_failure or (
+        isinstance(resp, dict) and bool(resp.get("isError") or resp.get("is_error"))
+    )
     span.set_attribute("tool.is_error", is_error)
-    content = tool_response.get("content")
-    if isinstance(content, list):
-        content = "\n".join(b.get("text", "") for b in content if isinstance(b, dict))
-    if isinstance(content, str):
-        span.set_attribute("tool.output", _truncate(content, OUTPUT_LIMIT))
+    text = _response_text(resp) or payload.get("error") or ""
+    if text:
+        span.set_attribute("tool.output", _truncate(text, OUTPUT_LIMIT))
     if is_error:
-        span.set_status(otel["Status"](otel["StatusCode"].ERROR, "tool reported error"))
+        _set_status(span, True, "tool reported error")
     span.end(end_time=end_ns)
-    _safe_flush(otel)
-    try:
-        state_file.unlink()
-    except Exception:
-        pass
 
 
 # ---------------- entry point ----------------
+
+_HANDLERS = {
+    "UserPromptSubmit": _ensure_root_from,
+    "SessionEnd": lambda p, d: _emit_session_complete(p, d),
+    "Stop": _handle_stop,
+    "StopFailure": lambda p, d: _emit_session_complete(p, d, is_error=True),
+    "PermissionDenied": lambda p, d: _handle_permission(p, d, denied=True),
+    "PermissionRequest": lambda p, d: _handle_permission(p, d, denied=False),
+    "PreCompact": _handle_pre_compact,
+    "PostCompact": _handle_post_compact,
+    "InstructionsLoaded": _handle_instructions_loaded,
+    "SubagentStart": _handle_subagent_start,
+    "SubagentStop": _handle_subagent_stop,
+}
+
 
 def main():
     try:
@@ -1357,7 +1434,7 @@ def main():
     except Exception:
         raw = ""
     _log(
-        f"called tracing={os.environ.get('CLAUDE_FORGE_TRACING','UNSET')} bytes={len(raw)}",
+        f"called tracing={os.environ.get('CLAUDE_FORGE_TRACING', 'UNSET')} bytes={len(raw)}",
         raw,
     )
     if _INJECTION_EXTRA_DROPPED:
@@ -1374,72 +1451,38 @@ def main():
     except Exception:
         _exit_ok()
 
-    event = payload.get("hook_event_name") or payload.get("hookEventName") or ""
-    session_id = payload.get("session_id") or payload.get("sessionId") or "default"
+    event = payload.get("hook_event_name") or ""
+    session_id = payload.get("session_id") or "default"
 
     try:
-        otel = _otel()
         state_dir = _state_dir(session_id)
     except Exception:
         _exit_ok()
 
     try:
-        if event in ("UserPromptSubmit", "user_prompt_submit"):
-            _handle_user_prompt(otel, payload, state_dir)
-        elif event in ("SessionStart", "session_start"):
-            _handle_session_start(otel, payload, state_dir)
-        elif event in ("SessionEnd", "session_end"):
-            _handle_session_end(otel, payload, state_dir)
-        elif event in ("Stop", "stop"):
-            _handle_stop(otel, payload, state_dir)
-        elif event in ("StopFailure", "stop_failure"):
-            _handle_stop_failure(otel, payload, state_dir)
-        elif event in ("PermissionDenied", "permission_denied"):
-            _handle_permission(otel, payload, state_dir, denied=True)
-        elif event in ("PermissionRequest", "permission_request"):
-            _handle_permission(otel, payload, state_dir, denied=False)
-        elif event in ("PreCompact", "pre_compact"):
-            _handle_pre_compact(otel, payload, state_dir)
-        elif event in ("PostCompact", "post_compact"):
-            _handle_post_compact(otel, payload, state_dir)
-        elif event in ("InstructionsLoaded", "instructions_loaded"):
-            _handle_instructions_loaded(otel, payload, state_dir)
-        elif event in ("PreToolUse", "pre_tool_use",
-                       "PostToolUse", "post_tool_use",
-                       "PostToolUseFailure", "post_tool_use_failure"):
-            tool_name = payload.get("tool_name") or payload.get("toolName") or ""
+        if event in ("PreToolUse", "PostToolUse", "PostToolUseFailure"):
             tool_input = payload.get("tool_input") or {}
-            raw_tool_use_id = (
-                payload.get("tool_use_id")
-                or payload.get("toolUseId")
-                or tool_input.get("id")
-                or _key_for(tool_name, tool_input)
+            raw_tool_use_id = payload.get("tool_use_id") or _key_for(
+                payload.get("tool_name") or "", tool_input
             )
-            # tool_use_id becomes a filename (agent_<id>.json / tool_<id>.json),
+            # tool_use_id becomes a filename (spawn_<id>.json / tool_<id>.json),
             # so strip anything that could escape the state dir.
             tool_use_id = _safe_name(raw_tool_use_id, fallback_prefix="tu")
-            is_subagent = tool_name in SUBAGENT_TOOLS
-            is_failure = event in ("PostToolUseFailure", "post_tool_use_failure")
-            if event in ("PreToolUse", "pre_tool_use"):
-                if is_subagent:
-                    _handle_subagent_pre(otel, payload, state_dir, tool_use_id)
-                else:
-                    _handle_inner_pre(payload, state_dir, tool_use_id)
+            if event == "PreToolUse":
+                _handle_tool_pre(payload, state_dir, tool_use_id)
             else:
-                # PostToolUseFailure carries the error tool_result. Force the
-                # is_error attribute so the span status reflects the failure
-                # even when the payload doesn't set isError explicitly.
-                if is_failure:
-                    tr = payload.setdefault("tool_response", {})
-                    if isinstance(tr, dict):
-                        tr.setdefault("isError", True)
-                if is_subagent:
-                    _handle_subagent_post(otel, payload, state_dir, tool_use_id)
-                else:
-                    _handle_inner_post(otel, payload, state_dir, tool_use_id)
+                _handle_tool_post(
+                    payload,
+                    state_dir,
+                    tool_use_id,
+                    is_failure=event == "PostToolUseFailure",
+                )
+        elif event in _HANDLERS:
+            _HANDLERS[event](payload, state_dir)
     except Exception as e:
         _log(f"handler error event={event}: {e!r}")
 
+    _safe_flush()
     _exit_ok()
 
 

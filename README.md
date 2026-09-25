@@ -178,11 +178,11 @@ python -m pip install pytest
 python -m pytest evaluation/ -v
 ```
 
-See [evaluation/README.md](evaluation/README.md) for the full pyramid and the live-run trajectory check. CI runs Tiers A and C on every push and pull request (`.github/workflows/evaluation.yml`).
+See [evaluation/README.md](evaluation/README.md) for the full pyramid and the live-run trajectory check. CI runs Tiers A, C and D (hook replay) on every push and pull request (`.github/workflows/evaluation.yml`).
 
 ## Tracing (optional)
 
-Claude Forge ships an opt-in OpenTelemetry hook that emits one span per subagent invocation, parented to a per-session root, so a `/pipeline` run shows up as a single trace in Jaeger with per-subagent token counts and durations.
+Claude Forge ships an opt-in OpenTelemetry hook that traces every agent a run spawns, parented to a per-session root, so a `/pipeline` run shows up as a single trace in Jaeger. Each agent gets an anchor span (keyed by the `agent_id` Claude Code puts on its hook events, so parallel evaluators never mix), its file mutations as child spans, and one `subagent_result` span per run segment (spawn or `SendMessage` resume) carrying its report, duration, and token usage. Agent and tool spans carry the OpenTelemetry GenAI attributes (`gen_ai.operation.name`, `gen_ai.agent.*`, `gen_ai.usage.*`), so agent-aware backends (Phoenix, Langfuse, Honeycomb) recognise them.
 
 It is **off by default**. Without `CLAUDE_FORGE_TRACING=1` the hook is a no-op and cannot break a tool call.
 
@@ -237,10 +237,10 @@ The script:
 - Creates a dedicated venv at `~/.local/share/claude-forge/venv` (uses [`uv`](https://astral.sh/uv) if installed, otherwise `python3 -m venv`)
 - Installs `opentelemetry-api`, `opentelemetry-sdk`, `opentelemetry-exporter-otlp-proto-grpc` into that venv
 - Copies the hook to `~/.local/share/claude-forge/trace_subagents.py`
-- Merges hook entries into `./.claude/settings.local.json` (preserves any existing keys)
+- Merges hook entries into `./.claude/settings.local.json` (preserves any existing keys). Tool hooks match only the tools traced by default, and every event except `PreToolUse`, `SubagentStart`, and `SessionEnd` runs as an async hook, so tracing never delays a tool call
 - Self-tests: runs the hook end-to-end and probes the OTLP endpoint
 
-Flags: `--no-settings` (install only, print snippet), `--uninstall` (remove the venv + hook).
+Flags: `--no-settings` (install only, print snippet), `--all-tools` (hook every tool call; needed for `CLAUDE_FORGE_TRACE_INNER` or Bash spans), `--uninstall` (remove the venv + hook).
 
 **Tip — alias it.** You'll re-run this command per-project (one-time wiring) and after every claude-forge release (to refresh the shared hook). Add to `~/.bashrc` (or `~/.zshrc`) once:
 
@@ -265,7 +265,8 @@ Add to your shell init (`~/.bashrc`, `~/.zshrc`, etc.) and restart your terminal
 
 ```bash
 export CLAUDE_FORGE_TRACING=1
-# optional override; defaults to http://localhost:4317
+# optional override; defaults to http://localhost:4317. Standard OTLP env vars apply:
+# OTEL_EXPORTER_OTLP_HEADERS for auth, and https:// endpoints use TLS.
 export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
 ```
 
@@ -295,7 +296,7 @@ Verify after the three commands:
 
 ```bash
 ls ~/.claude/plugins/cache/claude-forge/forge/             # should list the new version directory
-grep -c MUTATION_TOOLS ~/.local/share/claude-forge/trace_subagents.py   # should be > 0 (proves the deployed hook is current)
+grep -c _handle_subagent_stop ~/.local/share/claude-forge/trace_subagents.py   # should be > 0 (proves the deployed hook is current)
 ```
 
 The deployed hook lives at `~/.local/share/claude-forge/trace_subagents.py`. Every project's `settings.local.json` points to that absolute path, so **all projects pick up the new hook automatically** on their next tool call — no per-project re-run and no Claude Code restart needed.
@@ -306,18 +307,22 @@ The deployed hook lives at `~/.local/share/claude-forge/trace_subagents.py`. Eve
 |---|---|---|
 | `CLAUDE_FORGE_TRACING` | unset | Master on/off — hook is a no-op without this |
 | `CLAUDE_FORGE_TRACE_MUTATIONS` | `1` (on) | Trace each subagent's mutational tool calls as child spans. On by default — these show *what* each subagent changed. Set to `0` for pure agent-level traces. |
-| `CLAUDE_FORGE_TRACE_MUTATION_TOOLS` | `Write,Edit,MultiEdit` | Comma-separated list of tools traced as mutations. `Bash` is **excluded by default** because pipeline runs invoke it hundreds of times (git, npm, tests, ls) and the noise drowns out Write/Edit visibility. Add it back via `CLAUDE_FORGE_TRACE_MUTATION_TOOLS="Write,Edit,MultiEdit,Bash"` if you need Bash spans. |
-| `CLAUDE_FORGE_TRACE_INNER` | unset | Also trace *non-mutational* inner tools (Read/Glob/Grep/etc.). Off by default — a `/pipeline` can fire 200+ such calls. |
+| `CLAUDE_FORGE_TRACE_MUTATION_TOOLS` | `Write,Edit,MultiEdit,NotebookEdit` | Comma-separated list of tools traced as mutations. `Bash` is **excluded by default** because pipeline runs invoke it hundreds of times (git, npm, tests, ls) and the noise drowns out Write/Edit visibility. Add it back via `CLAUDE_FORGE_TRACE_MUTATION_TOOLS="Write,Edit,MultiEdit,NotebookEdit,Bash"` and install with `--all-tools` if you need Bash spans. |
+| `CLAUDE_FORGE_TRACE_INNER` | unset | Also trace *non-mutational* inner tools (Read/Glob/Grep/etc.). Off by default — a `/pipeline` can fire 200+ such calls. Requires installing with `--all-tools`. |
 | `CLAUDE_FORGE_TRACE_TOOL_BLOCKLIST` | `Read,Glob,Grep,TodoWrite,NotebookRead` | When inner tracing is on, comma-separated tools to skip. Empty string disables the blocklist |
 | `CLAUDE_FORGE_TRACE_SECURITY` | `1` (on) | Defense-in-depth detection layer (see below). Emits `security:dp{1..5}.*` spans and a per-session summary. Detection only — never blocks a tool call. Set `0` to disable. |
 | `CLAUDE_FORGE_SECURITY_INJECTION_EXTRA` | unset | Optional extra regex appended to the DP1 instruction-injection pattern set (for repo-specific markers) |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4317` | OTLP/gRPC endpoint for any backend (Jaeger, Tempo, Honeycomb, etc.) |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4317` | OTLP/gRPC endpoint for any backend (Jaeger, Tempo, Honeycomb, etc.). `https://` endpoints use TLS; `OTEL_EXPORTER_OTLP_HEADERS` supplies auth headers |
 | `CLAUDE_FORGE_PHASE_TARGET_TOKENS` | `150000` | Target token budget per pipeline phase (Stage size). Read by the Planner when sizing phases and by the Plan Reviewer when judging them. Smaller values produce more, smaller phases; larger values produce fewer, larger phases. |
 | `CLAUDE_FORGE_PHASE_MAX_TOKENS` | `250000` | Hard ceiling per phase — Planner must not exceed this and Plan Reviewer flags phases above it (context-pressure risk). |
 
+### Alongside Claude Code's native telemetry
+
+Claude Code can export its own OpenTelemetry traces (beta: `CLAUDE_CODE_ENABLE_TELEMETRY=1`, `CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1`, `OTEL_TRACES_EXPORTER=otlp`), with a span per model request and tool call and subagent spans nested under the Agent call. Point it at the same Jaeger for model-level latency and cost. The two are complementary: native telemetry shows *what the model did*; Forge's hook adds what native telemetry cannot express: agent reports, pipeline roles, governance signals, and the security layer below. They appear as separate traces, because Claude Code does not pass trace context to hook processes.
+
 ### Security tracing (defense in depth)
 
-A multi-agent pipeline can be subverted without a single error in the logs — a poisoned file comment, a forged approval signal, or a reviewer that rubber-stamps. When `CLAUDE_FORGE_TRACING=1`, Forge adds a **passive detection layer** that makes those events visible in Jaeger. It reads each subagent's role and actions from Claude Code's own transcript metadata — which file/text content can't forge — so it can attest signal provenance and audit consensus out of band. It is **detection only**: it never blocks a tool call or changes pipeline flow, and it's tuned for first-party repos (low false positives). Disable with `CLAUDE_FORGE_TRACE_SECURITY=0`.
+A multi-agent pipeline can be subverted without a single error in the logs — a poisoned file comment, a forged approval signal, or a reviewer that rubber-stamps. When `CLAUDE_FORGE_TRACING=1`, Forge adds a **passive detection layer** that makes those events visible in Jaeger. It reads each subagent's role from the `agent_type` Claude Code stamps on its hook events, and its actions from its own transcript — neither of which file/text content can forge — so it can attest signal provenance and audit consensus out of band. It is **detection only**: it never blocks a tool call or changes pipeline flow, and it's tuned for first-party repos (low false positives). Disable with `CLAUDE_FORGE_TRACE_SECURITY=0`.
 
 Findings surface as `security:dp{1..5}.*` spans (red, status ERROR) plus `forge.security.*` attributes on the `session_complete` span (`findings_total`, per-DP counts, `flagged`, and a `signal_timeline`):
 
