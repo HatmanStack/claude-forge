@@ -6,9 +6,9 @@ deterministic at the base, realistic at the top.
 
 | Tier | What | Where | Cadence |
 |------|------|-------|---------|
-| **A — Contracts** | Deterministic structural checks (frontmatter, tool policy, wiring, manifests) | `tier_a_contracts/` | Every push / PR |
+| **A — Contracts** | Deterministic structural checks (frontmatter, tool and model policy, wiring, manifests) | `tier_a_contracts/` | Every push / PR |
 | **B — Single agent** | `claude plugin eval` cases: one agent against a scaffolded fixture, scored against a no-plugin baseline | `../evals/` | On demand (LLM-costed) |
-| **C — Trajectory** | Governance-signal order validators (provenance, gate order, no skipped review) | `tier_c_trajectory/` + `check_run.py` | Synthetic per-PR; real runs nightly |
+| **C — Trajectory** | Governance-signal order validators (provenance, gate order, no skipped review), and `/forge:run` replayed against scripted agent replies | `tier_c_trajectory/` + `check_run.py` | Per-PR; real runs via `check_run.py` |
 | **D — Live traces** | OpenTelemetry → Jaeger, plus `security:dp{1..5}.*` spans; a replay of recorded hook events guards the hook itself | `../hooks/trace_subagents.py`, `tier_d_tracing/` | Replay per-PR; traces on real runs |
 
 Forge is itself an evaluation system (its adversarial reviewers are in-pipeline
@@ -19,12 +19,13 @@ native-subagent migration can't silently break the team.
 
 ```bash
 python -m pip install pytest
-python -m pytest evaluation/ -v          # Tier A + Tier C
+python -m pytest evaluation/ -v          # Tier A + Tier C (+ Tier D if OpenTelemetry is installed)
 python -m pytest evaluation/tier_a_contracts
 python -m pytest evaluation/tier_c_trajectory
+node --test evaluation/tier_c_trajectory/workflow_run.test.mjs   # /forge:run orchestration
 ```
 
-No network, no LLM, no API keys — Tiers A and C are pure-stdlib + pytest. The Tier D replay
+No network, no LLM, no API keys — Tiers A and C are pure-stdlib + pytest, plus Node for the workflow trajectories. The Tier D replay
 also needs `opentelemetry-sdk` (spans go to an in-memory exporter) and skips without it:
 
 ```bash
@@ -42,6 +43,8 @@ automatically. Freezes the invariants from the native-subagent migration:
 - **tool policy per role class**: generators get `Write`+`Edit`; reviewers get `Edit` but not `Write` (read-only over source); assessors are fully read-only; **no role gets `Agent`** (no nesting); tools stay within the allowed vocabulary
 - every `forge:<type>` referenced under `skills/` resolves to an agent file, and every agent is referenced (no dangling refs, no orphans)
 - `pipeline-protocol.md` lists every role; `plugin.json` declares no `agents` field (auto-discovery preserved); `plugin.json` / `marketplace.json` versions agree; the `CHANGELOG` has the current version
+- **model policy**: every agent pins `model` (opus for the Planner and every gate, sonnet for generators and assessors), and `workflows/run.js` pins the same model per role
+- every skill is user-invoked (`disable-model-invocation: true`)
 - the trace hook's role taxonomy and signal-authorization map match the registry (security/eval can't drift from the agents)
 
 ## Tier C — trajectory
@@ -66,6 +69,19 @@ python evaluation/check_run.py /tmp/claude-forge-tracing/<session>/trace-summary
 
 This is the bridge from Tier D (observability) to Tier C (assertion): the same
 trace data that powers Jaeger also proves the run followed the protocol.
+
+### `/forge:run` orchestration
+
+`workflow_run.test.mjs` runs `workflows/run.js` with a stub `agent()` that
+returns scripted reports, and asserts on the sequence of roles it spawns:
+
+- gate order per flow, and each loop stopping at 3 iterations
+- resume entry points: approved phases skipped, open feedback resumes at the
+  implementer, an unreviewed phase at the reviewer, existing plan files at plan review
+- phase tags routing to their implementer/reviewer pair, and each flow's default pair
+- the unified audit re-planning significant unverified findings exactly once
+- a recorded verdict stopping the run unless `rework` is passed
+- every agent pinning a non-Fable model, and every exit recorded in `skill-runs.json`
 
 ## Tier D — hook replay
 

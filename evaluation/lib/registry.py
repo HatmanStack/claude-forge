@@ -103,7 +103,8 @@ def load_agents():
 
 # ---- Wiring / reference scanning ----------------------------------------------
 
-_FORGE_REF_RE = re.compile(r"forge:([a-z0-9-]+)")
+# `/forge:run` and `/forge:pipeline` are slash commands, not agent types.
+_FORGE_REF_RE = re.compile(r"(?<!/)forge:([a-z0-9-]+)")
 
 
 def scan_skill_refs():

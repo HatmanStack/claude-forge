@@ -12,7 +12,8 @@ Wired to Claude Code hooks by bin/install-tracing.sh (see also
                                          start; opens a new run segment on resume
     - Pre/PostToolUse inside a subagent (payload carries `agent_id`)
                                        → tool:<name> spans parented to that agent;
-                                         SendMessage(to="main") reports are captured
+                                         reports are captured from SendMessage(to="main")
+                                         (skills) and StructuredOutput (/forge:run)
     - PostToolUse SendMessage (main)   → message:<name> span (orchestrator continuation)
     - SubagentStop                     → subagent_result:<name> for the run segment,
                                          token usage, security analysis
@@ -1346,6 +1347,18 @@ def _handle_tool_pre(payload, state_dir, tool_use_id):
             {
                 "ts": time.time_ns(),
                 "message": msg if isinstance(msg, str) else json.dumps(msg, default=str),
+            },
+        )
+    if aid and tool_name == "StructuredOutput":
+        # /forge:run agents report through a typed StructuredOutput call. Put
+        # the signal on its own final line, as a SendMessage report carries it,
+        # so the line-anchored signal detectors read both channels alike.
+        body = {k: v for k, v in ti.items() if k != "signal"}
+        _append_jsonl(
+            state_dir / f"reports_{aid}.jsonl",
+            {
+                "ts": time.time_ns(),
+                "message": f"{json.dumps(body, default=str)}\n{ti.get('signal') or ''}",
             },
         )
     if not aid and tool_name == "SendMessage":

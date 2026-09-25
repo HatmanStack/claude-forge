@@ -11,12 +11,17 @@ export const meta = {
 }
 
 // ---------------------------------------------------------------------------
-// Input. `/forge:run <plan-id>` passes the id as a string; an object form adds
-// options: { plan, rework, agentPrefix }.
-//   rework:      re-enter after a recorded NO-GO / UNVERIFIED instead of stopping
-//   agentPrefix: 'forge:' for the plugin install, '' for a standalone copy
+// Input: `/forge:run <plan-id> [rework] [standalone]`, or an object
+// { plan, rework, agentPrefix }.
+//   rework:     re-enter after a recorded NO-GO / UNVERIFIED instead of stopping
+//   standalone: roles are addressed without the `forge:` plugin prefix
 // ---------------------------------------------------------------------------
-const input = typeof args === 'string' ? { plan: args } : (args || {})
+function parseArgs(text) {
+  const [plan, ...flags] = text.trim().split(/\s+/)
+  const has = f => flags.includes(f) || flags.includes(`--${f}`)
+  return { plan, rework: has('rework'), agentPrefix: has('standalone') ? '' : undefined }
+}
+const input = typeof args === 'string' ? parseArgs(args) : (args || {})
 const PLAN = String(input.plan || '').trim()
 if (!/^\d{4}-\d{2}-\d{2}-[a-z0-9-]+$/.test(PLAN)) {
   return { verdict: 'ERROR', message: `Expected a plan id like 2026-03-12-user-auth, got: ${JSON.stringify(input.plan)}` }
@@ -141,7 +146,7 @@ if (state.finalVerdict === FINAL_OK) {
 if (state.finalVerdict !== 'NONE' && !input.rework) {
   return {
     verdict: state.finalVerdict, flow: FLOW,
-    message: `The last run ended ${state.finalVerdict}; see ${DIR}/feedback.md. To rework it, run /forge:run with { plan: "${PLAN}", rework: true }.`,
+    message: `The last run ended ${state.finalVerdict}; see ${DIR}/feedback.md. To rework it, run /forge:run ${PLAN} rework.`,
   }
 }
 
@@ -382,7 +387,16 @@ async function runPhases(phases, statusOf) {
   return { ok: true }
 }
 
-const stopped = (why) => ({ verdict: 'MAX_ITERATIONS', flow: FLOW, message: `Pipeline paused: ${why}. Unresolved items are in ${DIR}/feedback.md.`, history })
+// Every exit records the run in .claude/skill-runs.json, as the skills do.
+async function finish(result) {
+  await agent(`Append this entry to the JSON array in .claude/skill-runs.json at the repo root, creating the file as [] if it is missing and replacing it with a fresh array if it is not valid JSON. Use today's date. Change nothing else.
+
+{"skill": "run", "date": "<today, YYYY-MM-DD>", "plan": "${PLAN}", "flow": "${FLOW}", "verdict": "${result.verdict}"}`,
+    { label: 'record-run', model: 'haiku', effort: 'low' })
+  return result
+}
+
+const stopped = (why) => finish({ verdict: 'MAX_ITERATIONS', flow: FLOW, message: `Pipeline paused: ${why}. Unresolved items are in ${DIR}/feedback.md.`, history })
 
 // ---------------------------------------------------------------------------
 // repo-eval: calibrate the three evaluators' scores before planning.
@@ -410,7 +424,7 @@ if (FLOW === 'repo-eval' && !state.evalCalibrated) {
 }
 
 // ---------------------------------------------------------------------------
-// Rework after a recorded NO-GO / UNVERIFIED (only with { rework: true }).
+// Rework after a recorded NO-GO / UNVERIFIED (only with the rework flag).
 // ---------------------------------------------------------------------------
 let phases = state.phases
 let planApproved = state.planApproved
@@ -455,11 +469,11 @@ If ready: record GO in feedback.md and signal GO.
 If not ready: write feedback to ${DIR}/feedback.md tagged FINAL_REVIEW, categorize issues as plan-level or implementation-level, and signal NO-GO.`), FINAL_REPORT, { label: 'final-reviewer', phase: 'Final gate' })
   if (!f) return { verdict: 'ERROR', flow: FLOW, message: 'Final reviewer failed', history }
   history.push(`final review: ${f.signal}`)
-  return {
+  return finish({
     verdict: f.signal, flow: FLOW, summary: f.summary, history,
     planLevelIssues: f.planLevelIssues, implementationLevelIssues: f.implementationLevelIssues,
-    next: f.signal === 'GO' ? 'Production ready.' : `Address the issues or run /forge:run with { plan: "${PLAN}", rework: true }.`,
-  }
+    next: f.signal === 'GO' ? 'Production ready.' : `Address the issues or run /forge:run ${PLAN} rework.`,
+  })
 }
 
 // Audit flows: verify the original findings; the unified audit flow re-plans
@@ -472,11 +486,11 @@ Record the result in ${DIR}/feedback.md under a "## Verification" heading (add i
   history.push(`verification ${cycle}: ${v.signal}`)
   const loopBack = FLOW === 'audit' && v.signal === 'UNVERIFIED' && v.unverified.length >= 3 && cycle < MAX_VERIFY_CYCLES
   if (!loopBack) {
-    return {
+    return finish({
       verdict: v.signal, flow: FLOW, summary: v.summary, unverified: v.unverified, history,
       next: v.signal === 'VERIFIED' ? 'All remediation is committed and verified.'
-        : `Review the unverified items, then run /forge:run with { plan: "${PLAN}", rework: true } or accept as-is.`,
-    }
+        : `Review the unverified items, then run /forge:run ${PLAN} rework, or accept as-is.`,
+    })
   }
   log(`${v.unverified.length} findings unverified: re-planning (cycle ${cycle + 1} of ${MAX_VERIFY_CYCLES})`)
   const before = new Set(phases.map(p => p.n))

@@ -1,6 +1,6 @@
 # Pipeline Protocol
 
-Shared contract defining stage sequencing, signals, and communication channels for the adversarial review pipeline. All role documents reference this protocol.
+Shared contract defining stage sequencing, signals, and communication channels for the adversarial review pipeline. It binds both runners: the `/forge:pipeline` skill, which orchestrates turn by turn in the session, and the `/forge:run` workflow (`workflows/run.js`), which encodes the same stages in a script.
 
 ## Stage Sequence
 
@@ -108,13 +108,16 @@ SendMessage(to="plan-reviewer", message="Re-review the revised plan...")
 
 ### Signals Arrive by Message, Not by Return Value
 
-Agents run as teammates. An agent's plain-text output is **discarded** — only a `SendMessage(to="main")` call reaches the orchestrator. Every agent definition instructs its role to report this way; see each agent's *Reporting Results* section.
+A role reports on one of two channels; each agent's *Reporting Results* section covers both:
 
-Consequences for the orchestrator:
+- **Under `/forge:run`**, the role calls `StructuredOutput` with a typed report whose `signal` field is the verdict. The script branches on that field, so a signal can't be misread, skipped, or forged by the orchestrator.
+- **Under `/forge:pipeline`**, the role runs as a teammate. Its plain-text output is **discarded**; only a `SendMessage(to="main")` call reaches the orchestrator.
+
+Consequences for the `/forge:pipeline` orchestrator:
 
 - The `Agent` call returns as soon as the agent is spawned. It does **not** block, and its result never contains the agent's report.
 - A bare `idle_notification` with no accompanying message means the agent finished without reporting. Ask it to resend via `SendMessage(to="main")` rather than inferring its verdict.
-- **Never manufacture a signal you did not receive.** Reading `feedback.md` tells you what a reviewer *wrote*; it does not tell you a review ran. An approving pass writes nothing, so an unchanged `feedback.md` is indistinguishable from a review that never happened — that ambiguity must be resolved by asking the agent, not by assuming.
+- **Never manufacture a signal you did not receive.** A gate's report is the verdict; the approval lines in `feedback.md` exist so a later run can resume, not to stand in for a report you are waiting on.
 
 ## Communication Channel: feedback.md
 
@@ -147,6 +150,15 @@ All review feedback lives in `docs/plans/<plan_id>/feedback.md`. Plan documents 
 **Resolution:** Brief description of how it was addressed
 
 ---
+
+## Approvals
+
+PLAN_APPROVED
+PHASE_APPROVED — Phase 1
+
+## Verification
+
+VERIFIED
 ```
 
 ### Rules
@@ -156,6 +168,8 @@ All review feedback lives in `docs/plans/<plan_id>/feedback.md`. Plan documents 
 - Tag feedback with `PLAN_REVIEW` or `CODE_REVIEW` so the correct generator knows which items are theirs
 - Reference specific files, line numbers, and test names
 - Use rhetorical questions (Consider / Think about / Reflect) -- don't provide answers
+- **Gates record approvals.** When a gate approves, it appends one line under `## Approvals`: the Plan Reviewer `PLAN_APPROVED`, a phase reviewer `PHASE_APPROVED — Phase N`, the Final Reviewer `GO`. Resume reads these lines, so an approval that isn't recorded is reviewed again
+- **Verification records its result** under `## Verification`: `VERIFIED`, or `UNVERIFIED` with the unverified findings
 
 ## File Ownership
 
@@ -164,7 +178,7 @@ All review feedback lives in `docs/plans/<plan_id>/feedback.md`. Plan documents 
 | README.md     | Planner    | Planner                                    | Overview and navigation            |
 | Phase-0.md    | Planner    | Planner                                    | Architecture decisions (source of truth) |
 | Phase-N.md    | Planner    | Planner, Implementer (checkboxes only)     | Implementation instructions        |
-| feedback.md   | Planner    | Plan Reviewer, Reviewer, Orchestrator      | All review feedback + verification results |
-| eval.md       | Intake skill | Orchestrator (read only during pipeline) | Repo evaluation scores and targets         |
+| feedback.md   | Planner    | Gates (review feedback, approvals, verification), generators (resolving items) | Review feedback, approvals, verification results |
+| eval.md       | Intake skill | Calibration step (repo-eval) appends `## Calibration`; otherwise read only | Repo evaluation scores and targets |
 | health-audit.md | Intake skill | Orchestrator (read only during pipeline) | Tech debt findings                       |
 | doc-audit.md  | Intake skill | Orchestrator (read only during pipeline)   | Documentation drift findings               |

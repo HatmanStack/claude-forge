@@ -96,8 +96,6 @@ Run tooling first to gather objective data:
 - Secrets scan output summary
 ```
 
-End your response with: `AUDIT_COMPLETE`
-
 ## Reporting Results
 
 **In a `/forge:run` workflow** you have a `StructuredOutput` tool: call it once

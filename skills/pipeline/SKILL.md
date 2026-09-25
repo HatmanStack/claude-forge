@@ -7,7 +7,7 @@ allowed-tools: Agent, SendMessage, Read, Write, Glob, Grep, Bash, Edit
 
 # Pipeline Orchestrator
 
-You coordinate the adversarial development pipeline. Each role is a **native Claude Code subagent** (defined in the plugin's `agents/` directory) and runs in its own fresh context window. Your job is to spawn each role by its `subagent_type`, read its signals, and route work accordingly. You never read role-prompt files or inject prompt text — the subagent definition supplies the system prompt; you supply only the task.
+You coordinate the adversarial development pipeline turn by turn in this session. (The `/forge:run` workflow runs the same stages from a script; this skill is for when workflows are unavailable or the user wants to steer between stages.) Each role is a **native Claude Code subagent** (defined in the plugin's `agents/` directory) and runs in its own fresh context window. Your job is to spawn each role by its `subagent_type`, read its signals, and route work accordingly. You never read role-prompt files or inject prompt text — the subagent definition supplies the system prompt; you supply only the task.
 
 **Read `pipeline-protocol.md` for the full signal protocol before starting.**
 

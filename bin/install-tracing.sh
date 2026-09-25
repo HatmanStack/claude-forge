@@ -15,8 +15,8 @@
 #   bash bin/install-tracing.sh --all-tools     # hook every tool call (for CLAUDE_FORGE_TRACE_INNER=1)
 #   bash bin/install-tracing.sh --uninstall     # remove the venv + installed hook
 #
-# Tool hooks match only the tools traced by default (Agent, SendMessage and the
-# file-mutation tools), so the other tool calls never start a Python process.
+# Tool hooks match only the tools traced by default (Agent, SendMessage,
+# StructuredOutput and the file-mutation tools), so the other tool calls never start a Python process.
 # Everything except PreToolUse, SubagentStart and SessionEnd runs as an async
 # hook: tracing never delays a tool call.
 #
@@ -57,7 +57,7 @@ if [[ "${1:-}" == "--uninstall" ]]; then
 fi
 
 WRITE_SETTINGS=1
-TOOL_MATCHER="Agent|SendMessage|Write|Edit|MultiEdit|NotebookEdit"
+TOOL_MATCHER="Agent|SendMessage|StructuredOutput|Write|Edit|MultiEdit|NotebookEdit"
 for arg in "$@"; do
   case "$arg" in
     --no-settings) WRITE_SETTINGS=0 ;;

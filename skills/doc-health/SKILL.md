@@ -1,6 +1,6 @@
 ---
 name: doc-health
-description: Audit documentation drift against the code across 6 phases and write doc-audit.md for /pipeline remediation.
+description: Audit documentation drift against the code across 6 phases and write doc-audit.md for /forge:run remediation.
 disable-model-invocation: true
 allowed-tools: Agent, Read, Write, Glob, Grep, Bash
 ---
@@ -139,13 +139,15 @@ Findings: X drift, Y gaps, Z stale, W broken links
 Prevention tooling selected: [list]
 
 To remediate, run:
-/pipeline YYYY-MM-DD-docs-slug
+/forge:run YYYY-MM-DD-docs-slug
+
+(Standalone install: /run YYYY-MM-DD-docs-slug. To orchestrate in this session instead: /forge:pipeline YYYY-MM-DD-docs-slug.)
 ```
 
 ## Rules
 
 - **DO NOT** skip the scoping questions
-- **DO NOT** re-run the doc auditor agent after writing doc-audit.md — it runs exactly once here. Re-audit happens in `/pipeline` after all remediation is complete.
+- **DO NOT** re-run the doc auditor agent after writing doc-audit.md — it runs exactly once here. Re-audit happens in the pipeline's verification stage.
 - **DO NOT** start remediation — your only output is the audit doc
 - **DO** include the full auditor output (the planner needs the detail)
 - **DO** preserve file:line locations in all findings

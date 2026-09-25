@@ -109,8 +109,6 @@ Cross-reference code env var reads against documentation:
 1. "Coming Soon" section in `docs/graphql.md` — no GraphQL code exists
 ```
 
-End your response with: `DOC_AUDIT_COMPLETE`
-
 ## Reporting Results
 
 **In a `/forge:run` workflow** you have a `StructuredOutput` tool: call it once

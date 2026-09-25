@@ -1,6 +1,6 @@
 ---
 name: brainstorm
-description: Explore the codebase and turn a feature idea into a design spec (brainstorm.md) through clarifying questions; the entry point for /pipeline.
+description: Explore the codebase and turn a feature idea into a design spec (brainstorm.md) through clarifying questions; the entry point for /forge:run.
 disable-model-invocation: true
 ---
 
@@ -138,7 +138,9 @@ After writing the brainstorm document:
 Brainstorm complete: docs/plans/YYYY-MM-DD-feature-slug/brainstorm.md
 
 To start the automated build pipeline, run:
-/pipeline YYYY-MM-DD-feature-slug
+/forge:run YYYY-MM-DD-feature-slug
+
+(Standalone install: /run YYYY-MM-DD-feature-slug. To orchestrate in this session instead: /forge:pipeline YYYY-MM-DD-feature-slug.)
 ```
 
 ## Rules

@@ -20,7 +20,7 @@
             "command": "python3 ${CLAUDE_PROJECT_DIR}/hooks/trace_subagents.py"
           }
         ],
-        "matcher": "Agent|SendMessage|Write|Edit|MultiEdit|NotebookEdit"
+        "matcher": "Agent|SendMessage|StructuredOutput|Write|Edit|MultiEdit|NotebookEdit"
       }
     ],
     "PostToolUse": [
@@ -32,7 +32,7 @@
             "async": true
           }
         ],
-        "matcher": "Agent|SendMessage|Write|Edit|MultiEdit|NotebookEdit"
+        "matcher": "Agent|SendMessage|StructuredOutput|Write|Edit|MultiEdit|NotebookEdit"
       }
     ],
     "PostToolUseFailure": [
@@ -44,7 +44,7 @@
             "async": true
           }
         ],
-        "matcher": "Agent|SendMessage|Write|Edit|MultiEdit|NotebookEdit"
+        "matcher": "Agent|SendMessage|StructuredOutput|Write|Edit|MultiEdit|NotebookEdit"
       }
     ],
     "SubagentStart": [

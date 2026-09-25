@@ -25,45 +25,42 @@ Adversarial multi-agent pipeline for Claude Code. Separate AI agents generate an
 
 The first command registers the marketplace (persisted to `~/.claude/plugins/known_marketplaces.json`, so you only do it once). The second opens the install TUI — select a scope and confirm. The third activates the plugin in your current session.
 
-When installed as a plugin, skills are prefixed with `forge:` — e.g. `/forge:pipeline`, `/forge:brainstorm`. The unprefixed forms (`/pipeline`, etc.) shown in the usage examples below apply to the standalone install path.
+As a plugin, everything is namespaced `forge:`: the skills are `/forge:brainstorm`, `/forge:audit`, … and the pipeline workflow is `/forge:run`.
 
 **Standalone** (copy into any project):
 ```bash
 cp -r skills/ /path/to/your-project/.claude/skills/
 cp -r agents/ /path/to/your-project/.claude/agents/
-# Or personal (all projects)
-cp -r skills/ ~/.claude/skills/
-cp -r agents/ ~/.claude/agents/
+mkdir -p /path/to/your-project/.claude/workflows
+cp workflows/run.js /path/to/your-project/.claude/workflows/
+# Or personal (all projects): the same three directories under ~/.claude/
 ```
 
-Copy **both** `skills/` and `agents/` — the pipeline roles are native Claude Code subagents that live in `agents/`. When installed standalone, the orchestrator addresses them without the `forge:` plugin prefix (e.g. `planner` instead of `forge:planner`).
+Copy `agents/` alongside the rest: the pipeline roles are native Claude Code subagents. A standalone install drops the `forge:` prefix, so the skills are `/brainstorm`, `/audit`, … the workflow is `/run`, and roles are addressed as `planner` rather than `forge:planner` (pass `standalone` to the workflow: `/run <plan-id> standalone`).
 
-Requires [Claude Code](https://docs.anthropic.com/en/docs/claude-code) v1.0.33+ and a git-initialized project.
+Requires a git-initialized project and a recent Claude Code with [dynamic workflows](https://code.claude.com/docs/en/workflows) available (on Pro, turn on *Dynamic workflows* in `/config`).
 
-### Enable Agent Teams (Required)
+### Agent Teams (for the skills)
 
-Claude Forge relies on the `Agent` and `SendMessage` tools for multi-agent orchestration. These now require an experimental feature flag.
-
-**Set the environment variable before launching Claude Code:**
+The skills (`brainstorm`, the audit skills, and the `pipeline` skill) coordinate agents with the `Agent` and `SendMessage` tools, which require an experimental flag. `/forge:run` does not: a workflow runs its own agents.
 
 ```bash
 export CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1
 ```
 
-To make it permanent, add that line to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.) and restart your terminal.
+Add that line to your shell profile (`~/.bashrc`, `~/.zshrc`, …) and restart your terminal. Without it, skills that spawn or message agents fail.
 
-Without this flag, skills that spawn or communicate with sub-agents will fail.
+## Commands
 
-## Skills
-
-| Skill | Purpose | Output | Next Step |
-|-------|---------|--------|-----------|
-| `brainstorm` | Interactive design session, explores codebase, asks scoping questions | `brainstorm.md` | `pipeline` |
-| `audit` | Combined audit runner, select any combination of eval, health, docs | Multiple intake docs | `pipeline` |
-| `repo-eval` | 3-evaluator panel scoring 12 pillars | `eval.md` | `pipeline` |
-| `repo-health` | Technical debt audit across 4 vectors | `health-audit.md` | `pipeline` |
-| `doc-health` | Documentation drift detection across 6 phases | `doc-audit.md` | `pipeline` |
-| `pipeline` | Automated build/remediation cycle, routes by intake doc type | Committed code | Done |
+| Command | Kind | Purpose | Output |
+|---------|------|---------|--------|
+| `/forge:brainstorm` | skill | Interactive design session: explores the codebase, asks scoping questions | `brainstorm.md` |
+| `/forge:audit` | skill | Any combination of eval, health, and docs audits in one plan directory | intake docs |
+| `/forge:repo-eval` | skill | 3-evaluator panel scoring 12 pillars | `eval.md` |
+| `/forge:repo-health` | skill | Technical-debt audit across 4 vectors | `health-audit.md` |
+| `/forge:doc-health` | skill | Documentation drift detection across 6 phases | `doc-audit.md` |
+| `/forge:run` | workflow | **The pipeline.** Plans, implements, and reviews from any intake doc | committed code + a verdict |
+| `/forge:pipeline` | skill | The same pipeline, orchestrated turn by turn in your session | committed code |
 
 Every skill is user-invoked (`disable-model-invocation: true`): Claude never starts a multi-agent run on its own, and the skill descriptions stay out of context in sessions that don't use Forge.
 
@@ -71,25 +68,43 @@ Every skill is user-invoked (`disable-model-invocation: true`): Claude never sta
 
 ```bash
 # Feature development
-/brainstorm I want to add webhook support for payment events
-/pipeline 2026-03-12-payment-webhooks
+/forge:brainstorm I want to add webhook support for payment events
+/forge:run 2026-03-12-payment-webhooks
 
-# Full audit (health > eval > docs) with one pipeline run
-/audit all
-/pipeline 2026-03-15-audit-my-app
+# Full audit (health > eval > docs), one remediation run
+/forge:audit all
+/forge:run 2026-03-15-audit-my-app
 
-# Or run individual audits (each creates its own plan directory)
-/repo-eval
-/pipeline 2026-03-15-eval-my-app
+# Or a single audit (each creates its own plan directory)
+/forge:repo-eval
+/forge:run 2026-03-15-eval-my-app
 ```
 
-Resume any interrupted pipeline by re-running `/pipeline` with the same slug.
+## Running the Pipeline
+
+`/forge:run` and `/forge:pipeline` run the same stages with the same roles. They differ in who holds the plan.
+
+**`/forge:run` (recommended)** is a [workflow](https://code.claude.com/docs/en/workflows): a script (`workflows/run.js`) that the runtime executes in the background while your session stays free. The script owns the loop limits, resume entry points, and phase routing; every role returns a typed report, so a verdict is a schema field rather than text to parse, and a skipped or forged gate cannot happen by construction. Each iteration spawns a fresh agent that re-reads the plan files. Watch it with `/workflows`.
+
+A workflow cannot stop to ask you anything, so `/forge:run` ends with a verdict rather than a question:
+
+| Verdict | Meaning | Next |
+|---------|---------|------|
+| `GO` / `VERIFIED` | Feature production-ready / audit findings verified | Done |
+| `NO-GO` / `UNVERIFIED` | Recorded in `feedback.md` with the issues | Fix by hand, or `/forge:run <plan-id> rework` to re-plan and continue |
+| `MAX_ITERATIONS` | A plan or phase did not converge in 3 rounds | Read the open items in `feedback.md`, guide, then re-run |
+
+**`/forge:pipeline`** orchestrates in your conversation: the main session spawns each role, continues it with `SendMessage` across iterations, and stops to ask you at NO-GO or unverified findings. Use it when workflows are unavailable, or when you want to steer between stages.
+
+**Resume** either way by re-running with the same plan id. Both read the plan's state from `docs/plans/<plan-id>/`: plan and phase files, open review items, and the approvals the gates record under `## Approvals` in `feedback.md`. Approved phases are skipped; a phase with open feedback resumes at its implementer, one awaiting review at its reviewer.
 
 ## Pipeline Flows
 
 <p align="center">
   <img src="arch.jpeg" alt="Claude Forge" width="700">
 </p>
+
+The intake doc in the plan directory picks the flow.
 
 ### Feature (`brainstorm.md`)
 
@@ -101,90 +116,97 @@ Planner ↔ Plan Reviewer → Implementer ↔ Code Reviewer → Final Reviewer
 ### Repo Eval (`eval.md`)
 
 ```
-3 Evaluators → Planner ↔ Plan Reviewer → Implementer ↔ Reviewer → Verify
-(parallel)     (max 3)                   (max 3/phase)             verify findings
+Calibrate → Planner ↔ Plan Reviewer → Implementer ↔ Reviewer → Verify
+            (max 3)                   (max 3/phase)             VERIFIED/UNVERIFIED
 ```
 
 ### Repo Health (`health-audit.md`)
 
 ```
-Auditor → Planner ↔ Plan Reviewer → Hygienist ↔ Health Reviewer → Fortifier ↔ Health Reviewer → Verify
-                                     [cleanup]                      [guardrails]                   verify findings
+Planner ↔ Plan Reviewer → Hygienist ↔ Health Reviewer → Fortifier ↔ Health Reviewer → Verify
+                          [cleanup]                      [guardrails]
 ```
 
 ### Doc Health (`doc-audit.md`)
 
 ```
-Doc Auditor → Planner ↔ Plan Reviewer → Doc Engineer ↔ Doc Reviewer → Verify
-                                         [fix + prevent]               verify findings
+Planner ↔ Plan Reviewer → Doc Engineer ↔ Doc Reviewer → Verify
+                          [fix + prevent]
 ```
+
+### Unified Audit (several intake docs)
+
+One plan whose phases are tagged `[HYGIENIST]`, `[IMPLEMENTER]`, `[FORTIFIER]`, or `[DOC-ENGINEER]`; the tag picks each phase's implementer and reviewer. If verification leaves three or more findings unverified, the run re-plans them once before reporting.
 
 ## File Structure
 
 ```
 claude-forge/
 ├── .claude-plugin/
-│   └── plugin.json                 # Plugin manifest
-├── bin/
-│   └── install-tracing.sh          # Optional Jaeger/OpenTelemetry setup
-├── hooks/
-│   └── trace_subagents.py          # Tracing hook (installed via bin/install-tracing.sh)
-├── agents/                         # Native subagents (the "team") — auto-discovered as forge:<name>
-│   ├── planner.md                  # Generator — shared across all flows
-│   ├── plan-reviewer.md            # Discriminator — shared across all flows
-│   ├── implementer.md              # Generator — feature + repo-eval flows
-│   ├── reviewer.md                 # Discriminator — feature + repo-eval + verification
-│   ├── final-reviewer.md           # Discriminator — feature flow only
-│   ├── eval-hire.md                # The Pragmatist (read-only)
-│   ├── eval-stress.md              # The Oncall Engineer (read-only)
-│   ├── eval-day2.md                # The Team Lead (read-only)
-│   ├── health-auditor.md           # Pure assessment, no fix guidance (read-only)
-│   ├── health-hygienist.md         # Generator — subtractive (delete, simplify)
-│   ├── health-fortifier.md         # Generator — additive (lint, CI, hooks)
-│   ├── health-reviewer.md          # Discriminator — reviews hygienist + fortifier
-│   ├── doc-auditor.md              # 6-phase drift detection (read-only)
-│   ├── doc-engineer.md             # Generator — fix docs + add prevention
-│   └── doc-reviewer.md             # Discriminator — reviews doc changes
+│   ├── plugin.json                 # Plugin manifest
+│   └── marketplace.json
+├── agents/                         # Native subagents (the "team"), discovered as forge:<name>
+│   ├── planner.md                  # Generator (opus)
+│   ├── plan-reviewer.md            # Discriminator (opus)
+│   ├── implementer.md              # Generator (sonnet), feature + repo-eval flows
+│   ├── reviewer.md                 # Discriminator (opus), code review + verification
+│   ├── final-reviewer.md           # Discriminator (opus), feature flow only
+│   ├── eval-hire.md                # The Pragmatist (sonnet, read-only)
+│   ├── eval-stress.md              # The Oncall Engineer (sonnet, read-only)
+│   ├── eval-day2.md                # The Team Lead (sonnet, read-only)
+│   ├── health-auditor.md           # Tech-debt assessment (sonnet, read-only)
+│   ├── health-hygienist.md         # Generator (sonnet), subtractive
+│   ├── health-fortifier.md         # Generator (sonnet), additive guardrails
+│   ├── health-reviewer.md          # Discriminator (opus), hygienist + fortifier
+│   ├── doc-auditor.md              # 6-phase drift detection (sonnet, read-only)
+│   ├── doc-engineer.md             # Generator (sonnet), doc fixes + prevention
+│   └── doc-reviewer.md             # Discriminator (opus)
+├── workflows/
+│   └── run.js                      # /forge:run: the pipeline as a Workflow script
 ├── skills/
-│   ├── audit/SKILL.md              # Combined audit runner
 │   ├── brainstorm/SKILL.md
+│   ├── audit/SKILL.md              # Combined audit runner
 │   ├── repo-eval/SKILL.md
 │   ├── repo-health/SKILL.md
 │   ├── doc-health/SKILL.md
 │   └── pipeline/
-│       ├── SKILL.md                # Orchestrator (routes by intake doc type)
-│       ├── pipeline-protocol.md    # Signal protocol + subagent-type spec
-│       └── flows/
-│           ├── audit-flow.md       # Unified plan across multiple audit types
-│           ├── repo-eval-flow.md
-│           ├── repo-health-flow.md
-│           └── doc-health-flow.md
+│       ├── SKILL.md                # /forge:pipeline orchestrator (routes by intake doc)
+│       ├── pipeline-protocol.md    # Signals, feedback.md, file ownership
+│       └── flows/                  # audit, repo-eval, repo-health, doc-health
+├── evals/                          # Tier B: claude plugin eval cases
+├── evaluation/                     # Tiers A, C, D: contracts, trajectories, hook replay
+├── hooks/
+│   └── trace_subagents.py          # Optional OpenTelemetry tracing hook
+├── bin/
+│   └── install-tracing.sh          # Installs the hook and wires it into a project
 ├── docs/ARCHITECTURE.md
 ├── README.md
-├── CHANGELOG.md
-└── LICENSE
+└── CHANGELOG.md
 ```
 
-Each role is a **native Claude Code subagent**: its prompt is the file body and its tool/model access is declared in YAML frontmatter. Generators get write access (`Read, Write, Edit, Glob, Grep, Bash`); reviewers are restricted to `feedback.md` edits (`Read, Glob, Grep, Bash, Edit`); evaluators and auditors are strictly read-only (`Read, Glob, Grep, Bash`). The orchestrator skills spawn each role by `subagent_type` (e.g. `forge:planner`) and continue iteration loops with `SendMessage` — no role-prompt text is injected.
+Each role is a **native Claude Code subagent**: its prompt is the file body; its tools and model are pinned in YAML frontmatter. Generators get write access (`Read, Write, Edit, Glob, Grep, Bash`); reviewers are restricted to `feedback.md` edits (`Read, Glob, Grep, Bash, Edit`); evaluators and auditors are read-only (`Read, Glob, Grep, Bash`); no role can spawn agents. Both runners spawn roles by type (`forge:planner`) and pass only the task; no role-prompt text is injected.
 
 ## Evaluation
 
-Forge is itself an evaluation system, so it ships an evaluation harness for *its own* team — the regression net that keeps agents, tools, and the orchestrator honest as they change. It follows an evaluation pyramid (fast/deterministic at the base, realistic at the top):
+Forge is itself an evaluation system, so it ships an evaluation harness for *its own* team: the regression net that keeps agents, tools, and orchestration honest as they change. It follows an evaluation pyramid (fast and deterministic at the base, realistic at the top):
 
-- **Tier A — Contracts** (`evaluation/tier_a_contracts/`): deterministic checks of agent frontmatter, per-role tool policy (generators write, reviewers read-only over source, assessors fully read-only, no agent nests), wiring (`forge:<type>` references resolve), and manifest consistency. Runs on every push/PR — pure stdlib + pytest, no LLM.
-- **Tier C — Trajectory** (`evaluation/tier_c_trajectory/`): validates the sequence of governance signals against the protocol — signal provenance (no forged approvals), gate order, and no skipped reviews. Synthetic fixtures per-PR; real runs via `evaluation/check_run.py` against the trace hook's `trace-summary.json`.
-- **Tier D — Live traces**: the OpenTelemetry → Jaeger hook (below), including the `security:dp{1..5}.*` defense-in-depth spans.
+- **Tier A — Contracts** (`evaluation/tier_a_contracts/`): agent frontmatter, per-role tool and model policy, wiring (`forge:<type>` references resolve), user-invoked skills, the workflow's model pins, and manifest consistency.
+- **Tier B — Agent evals** (`evals/`): [`claude plugin eval`](https://code.claude.com/docs/en/plugin-evals) cases that run one agent against a scaffolded fixture and score it against plain Claude. Three reviewer cases: a spec violation, a standards violation, and a clean phase that must be approved.
+- **Tier C — Trajectory** (`evaluation/tier_c_trajectory/`): governance-signal validators (no forged approvals, gate order, no skipped reviews), and `/forge:run`'s orchestration replayed against scripted agent replies (loop limits, resume entry points, tag routing).
+- **Tier D — Traces** (`evaluation/tier_d_tracing/`): recorded Agent Teams hook events replayed through the tracing hook; live runs export to Jaeger with `security:dp{1..5}.*` spans.
 
 ```bash
-python -m pip install pytest
-python -m pytest evaluation/ -v
+python -m pip install pytest opentelemetry-sdk opentelemetry-exporter-otlp-proto-grpc
+python -m pytest evaluation/ -v                                   # Tiers A, C, D
+node --test evaluation/tier_c_trajectory/workflow_run.test.mjs    # /forge:run trajectories
+claude plugin eval . --scaffold --allow-tools Bash Edit           # Tier B (LLM-costed)
 ```
 
-See [evaluation/README.md](evaluation/README.md) for the full pyramid and the live-run trajectory check. CI runs Tiers A, C and D (hook replay) on every push and pull request (`.github/workflows/evaluation.yml`).
+See [evaluation/README.md](evaluation/README.md) for the full pyramid and the live-run trajectory check. CI runs Tiers A, C, and D on every push and pull request (`.github/workflows/evaluation.yml`); Tier B runs on demand.
 
 ## Tracing (optional)
 
-Claude Forge ships an opt-in OpenTelemetry hook that traces every agent a run spawns, parented to a per-session root, so a `/pipeline` run shows up as a single trace in Jaeger. Each agent gets an anchor span (keyed by the `agent_id` Claude Code puts on its hook events, so parallel evaluators never mix), its file mutations as child spans, and one `subagent_result` span per run segment (spawn or `SendMessage` resume) carrying its report, duration, and token usage. Agent and tool spans carry the OpenTelemetry GenAI attributes (`gen_ai.operation.name`, `gen_ai.agent.*`, `gen_ai.usage.*`), so agent-aware backends (Phoenix, Langfuse, Honeycomb) recognise them.
+Claude Forge ships an opt-in OpenTelemetry hook that traces every agent a run spawns, parented to a per-session root, so a pipeline run shows up as a single trace in Jaeger. Each agent gets an anchor span (keyed by the `agent_id` Claude Code puts on its hook events, so parallel evaluators never mix), its file mutations as child spans, and one `subagent_result` span per run segment (spawn or `SendMessage` resume) carrying its report, duration, and token usage. Agent and tool spans carry the OpenTelemetry GenAI attributes (`gen_ai.operation.name`, `gen_ai.agent.*`, `gen_ai.usage.*`), so agent-aware backends (Phoenix, Langfuse, Honeycomb) recognise them.
 
 It is **off by default**. Without `CLAUDE_FORGE_TRACING=1` the hook is a no-op and cannot break a tool call.
 
@@ -222,7 +244,7 @@ That gets you the UI at <http://localhost:16686> and OTLP/gRPC ingestion on `:43
 From a clone of this repo:
 
 ```bash
-cd your-project   # the project where you'll run /pipeline
+cd your-project   # the project where you'll run the pipeline
 bash /path/to/claude-forge/bin/install-tracing.sh
 ```
 
@@ -272,7 +294,7 @@ export CLAUDE_FORGE_TRACING=1
 export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
 ```
 
-Restart Claude Code from that shell, run `/pipeline`, then open <http://localhost:16686> and pick the `claude-forge` service. To disable, unset the env var (or run `bash bin/install-tracing.sh --uninstall`).
+Restart Claude Code from that shell, run the pipeline, then open <http://localhost:16686> and pick the `claude-forge` service. To disable, unset the env var (or run `bash bin/install-tracing.sh --uninstall`).
 
 ### Updating tracing
 
@@ -310,7 +332,7 @@ The deployed hook lives at `~/.local/share/claude-forge/trace_subagents.py`. Eve
 | `CLAUDE_FORGE_TRACING` | unset | Master on/off — hook is a no-op without this |
 | `CLAUDE_FORGE_TRACE_MUTATIONS` | `1` (on) | Trace each subagent's mutational tool calls as child spans. On by default — these show *what* each subagent changed. Set to `0` for pure agent-level traces. |
 | `CLAUDE_FORGE_TRACE_MUTATION_TOOLS` | `Write,Edit,MultiEdit,NotebookEdit` | Comma-separated list of tools traced as mutations. `Bash` is **excluded by default** because pipeline runs invoke it hundreds of times (git, npm, tests, ls) and the noise drowns out Write/Edit visibility. Add it back via `CLAUDE_FORGE_TRACE_MUTATION_TOOLS="Write,Edit,MultiEdit,NotebookEdit,Bash"` and install with `--all-tools` if you need Bash spans. |
-| `CLAUDE_FORGE_TRACE_INNER` | unset | Also trace *non-mutational* inner tools (Read/Glob/Grep/etc.). Off by default — a `/pipeline` can fire 200+ such calls. Requires installing with `--all-tools`. |
+| `CLAUDE_FORGE_TRACE_INNER` | unset | Also trace *non-mutational* inner tools (Read/Glob/Grep/etc.). Off by default — a pipeline run can fire 200+ such calls. Requires installing with `--all-tools`. |
 | `CLAUDE_FORGE_TRACE_TOOL_BLOCKLIST` | `Read,Glob,Grep,TodoWrite,NotebookRead` | When inner tracing is on, comma-separated tools to skip. Empty string disables the blocklist |
 | `CLAUDE_FORGE_TRACE_SECURITY` | `1` (on) | Defense-in-depth detection layer (see below). Emits `security:dp{1..5}.*` spans and a per-session summary. Detection only — never blocks a tool call. Set `0` to disable. |
 | `CLAUDE_FORGE_SECURITY_INJECTION_EXTRA` | unset | Optional extra regex appended to the DP1 instruction-injection pattern set (for repo-specific markers) |
