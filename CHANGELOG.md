@@ -5,6 +5,30 @@ All notable changes to Claude Forge will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.13.0] - 2026-09-24
+
+### Fixed
+
+- **Tracing recorded launch receipts as results.** With Agent Teams on, the `Agent` tool returns at spawn (`status: async_launched`), so every `subagent_result` span had ~0ms duration, no tokens, no inner tool spans, and the security pass analyzed the launch receipt instead of the agent's report. The hook now completes agents on `SubagentStop`, one span per run segment (spawn or `SendMessage` resume), carrying the agent's `SendMessage(to="main")` report; `agent.reported=false` flags an agent that stopped without reporting.
+- **Parallel agents shared one parent span.** Inner tool spans hung off a single `_current_agent.json`, so the `/repo-eval` and `/audit` evaluator fan-out attributed tools to whichever agent spawned last. Spans are now keyed by the `agent_id` Claude Code stamps on every hook fired inside a subagent. Tool hooks now fire inside subagents, so the transcript-scraping workaround for anthropics/claude-code#34692 is gone.
+- **`session_complete` fired mid-run.** `Stop` fires at the end of every orchestrator turn, including turns that end while agents run in the background. Session end now waits for an empty `background_tasks`, and `trace-summary.json` is rewritten after every agent run segment.
+- **`/pipeline` contradicted the 1.12.0 reporting contract.** `pipeline/SKILL.md` still told the orchestrator to verify signals "in the result", keep every agent in the foreground, and have agents "end your response with" a signal. It now waits for each agent's `SendMessage` report.
+- Removed the stale root `settings.local.json.example` (it matched the pre-rename `Task` tool).
+
+### Changed
+
+- **Every role pins a `model`.** Discriminators and the Planner run on `opus`; code generators and read-only assessors on `sonnet`. Unpinned agents inherited the session model. Enforced by Tier A.
+- **Every skill is user-invoked** (`disable-model-invocation: true`), so skill descriptions no longer load into every session and the model cannot start a multi-agent run on its own. Enforced by Tier A.
+- **Agent prompts pruned** with the no-op test: dead `pipeline-protocol.md` pointers (unreachable from a plugin install), tool lists restating frontmatter, and duplicated recaps and diagrams (280 lines across 15 roles). The reviewer's pre-approval check is now a checkable completion criterion.
+- **Tracing attributes follow the OpenTelemetry GenAI conventions:** `gen_ai.operation.name` (`invoke_agent` / `execute_tool`), `gen_ai.agent.*`, `gen_ai.tool.*`, and `gen_ai.usage.*`, which replaces `agent.tokens.*`. Queries or dashboards on `agent.tokens.*` need updating.
+- **Tracing is cheaper and safer.** Tool hooks match only traced tools (`--all-tools` widens them); every event except `PreToolUse`, `SubagentStart`, and `SessionEnd` runs as an async hook; OpenTelemetry loads only for events that emit. OTLP endpoint, headers, and TLS come from standard `OTEL_*` variables (no more unconditional plaintext). Session state is `0700`/`0600` with atomic writes and locking. The root span is named after the prompt.
+- `ruff.toml` pins line length 100 to match the existing code.
+
+### Added
+
+- **Tier B plugin evals** (`evals/`, run with `claude plugin eval`): `reviewer-catches-spec-violation` scores the reviewer against a no-plugin baseline on a fixture whose tests pass but whose code violates the spec.
+- **Tier D hook replay** (`evaluation/tier_d_tracing/`): recorded Agent Teams hook-event shapes replayed through the trace hook into an in-memory exporter; runs in CI.
+
 ## [1.12.0] - 2026-07-27
 
 ### Added
