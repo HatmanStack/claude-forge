@@ -48,7 +48,7 @@ The same stages, roles, and plan files run under two orchestrators. They differ 
 
 Moving the orchestration into code removes a class of failures rather than guarding against them. A skill orchestrator can misread a signal, skip a gate, or lose count of iterations. In the workflow, the verdict is a schema field the script branches on, and a gate that didn't run can't produce one. The cost is continuity: a workflow agent is one-shot, so a reviewer re-reads Phase-0 and the phase spec every iteration instead of remembering them. Pipeline state already lives in files, so that costs tokens, not correctness.
 
-Before planning, `/forge:run` spends one cheap read-only agent reporting the plan's state (which the script cannot read itself). It writes nothing under `.claude/`: Claude Code protects that directory, and a background agent can't ask for permission. The run's durable record is the plan directory (`## Approvals` and `## Verification` in `feedback.md`) and the verdict it returns. Every role agent is spawned with the model its frontmatter pins; a Tier A contract keeps the script's pins equal to the frontmatter, and a Tier C suite runs the script against scripted replies to check gate order, loop limits, resume entry points, and phase routing.
+Before planning, `/forge:run` spends one cheap read-only agent reporting the plan's state (which the script cannot read itself). It writes nothing under `.claude/`: Claude Code protects that directory, and a background agent can't ask for permission. The run's durable record is the plan directory (the `## Gate Log` in `feedback.md`) and the verdict it returns. Every role agent is spawned with the model its frontmatter pins; a Tier A contract keeps the script's pins equal to the frontmatter, and a Tier C suite runs the script against scripted replies to check gate order, loop limits, resume entry points, and phase routing.
 
 ## Signal Protocol
 
@@ -187,7 +187,7 @@ Each pipeline type has a different completion criteria:
 | Repo-Health | Verification of CRITICAL/HIGH findings | One reviewer agent checks specific file:line findings; MEDIUM/LOW acceptable to carry |
 | Doc-Health | Verification of DRIFT/STALE/BROKEN findings | One reviewer agent checks specific doc:code pairs |
 
-Evaluator and auditor agents run exactly once (during intake). The verification stage uses the existing code reviewer with a targeted prompt — one agent verifying specific findings instead of 3-5 agents re-scanning the entire codebase. The verifier records `VERIFIED` or `UNVERIFIED` under `## Verification` in `feedback.md`.
+Evaluator and auditor agents run exactly once (during intake). The verification stage uses the existing code reviewer with a targeted prompt — one agent verifying specific findings instead of 3-5 agents re-scanning the entire codebase. The verifier logs `VERIFIED` or `UNVERIFIED` in the `## Gate Log` of `feedback.md` and lists unverified findings under `## Verification`.
 
 ## State Recovery
 
@@ -198,7 +198,7 @@ Both runners resume from the plan directory. Re-running with the same plan id:
 3. Picks the re-entry point: planning, plan review, a phase's implementer (open feedback), a phase's reviewer (implemented or fixed, not yet approved), or the final gate
 4. Reports the detected state before continuing
 
-Gates record approvals under `## Approvals` in `feedback.md` (`PLAN_APPROVED`, `PHASE_APPROVED — Phase N`, `GO`), and the verifier records its result under `## Verification`. A phase is skipped only when its approval is recorded; implementation commits alone are not enough. Within a session, a stopped `/forge:run` can also be relaunched from `/workflows`, which replays completed agents from cache.
+Every gate decision is one line in an ordered `## Gate Log` in `feedback.md` (`PLAN_APPROVED`, `PHASE_APPROVED — Phase N`, `GO`/`NO-GO`, `VERIFIED`/`UNVERIFIED`), and a rework starts by logging `REWORK`. Resume reads the log in order: a verdict followed by `REWORK` is no longer current, and a reworked plan counts as approved only once a `PLAN_APPROVED` follows the `REWORK`. A phase is skipped only when its approval is logged; implementation commits alone are not enough. Within a session, a stopped `/forge:run` can also be relaunched from `/workflows`, which replays completed agents from cache.
 
 ## NO-GO Rollback
 

@@ -116,11 +116,11 @@ const state = await agent(
 
 - intakeDocs: which of brainstorm.md, eval.md, health-audit.md, doc-audit.md exist in ${DIR}/.
 - planFilesExist / phases: Phase-0.md exists; then every Phase-N.md with N >= 1, its title (first heading) and the tag in the title ([IMPLEMENTER], [HYGIENIST], [FORTIFIER], [DOC-ENGINEER], else NONE).
-- From ${DIR}/feedback.md (absent means nothing recorded):
-  - planApproved: PLAN_APPROVED appears under "## Approvals" and no PLAN_REVIEW item is OPEN (a later revision awaiting review is not approved).
+- From ${DIR}/feedback.md (absent means nothing recorded). Its "## Gate Log" section lists gate decisions one per line, oldest first:
+  - planApproved: the log has a PLAN_APPROVED line after its last REWORK line (or it has no REWORK line), and no PLAN_REVIEW item is OPEN.
   - openPlanReview: an item tagged PLAN_REVIEW has "**Status:** OPEN".
-  - phaseStatus, per phase: "approved" if "PHASE_APPROVED — Phase N" is under "## Approvals"; else "needs-fixes" if a CODE_REVIEW item for Phase N is OPEN; else "needs-review" if CODE_REVIEW items for Phase N are all resolved, or \`git log --oneline\` shows commits for phase N but it has no review entries; else "not-started".
-  - finalVerdict: GO if GO is under "## Approvals"; else NO-GO if any FINAL_REVIEW item is OPEN; else the last line of "## Verification" if it is VERIFIED or UNVERIFIED; else NONE. (Rework resolves FINAL_REVIEW items and appends REPLANNED under "## Verification", which clears the old verdict.)
+  - phaseStatus, per phase: "approved" if the log has "PHASE_APPROVED — Phase N"; else "needs-fixes" if a CODE_REVIEW item for Phase N is OPEN; else "needs-review" if CODE_REVIEW items for Phase N are all resolved, or \`git log --oneline\` shows commits for phase N but it has no review entries; else "not-started".
+  - finalVerdict: the last GO, NO-GO, VERIFIED or UNVERIFIED line in the log; NONE if there is none, or if a REWORK line comes after it.
 - evalCalibrated: eval.md exists and has a "## Calibration" section.`,
   { label: 'recover-state', model: 'sonnet', effort: 'low', schema: STATE },
 )
@@ -422,14 +422,12 @@ let phases = state.phases
 let planApproved = state.planApproved
 const statusMap = new Map(state.phaseStatus.map(s => [s.n, s.status]))
 if (input.rework && (state.finalVerdict === 'NO-GO' || state.finalVerdict === 'UNVERIFIED')) {
-  const source = state.finalVerdict === 'NO-GO' ? 'FINAL_REVIEW' : 'UNVERIFIED (under "## Verification")'
-  const plan = await planLoop(`Rework after ${state.finalVerdict}. Read ${DIR}/feedback.md for the ${source} items.
+  const source = state.finalVerdict === 'NO-GO' ? 'OPEN FINAL_REVIEW' : 'unverified (under "## Verification")'
+  const plan = await planLoop(`Rework after ${state.finalVerdict}. First append the line REWORK under "## Gate Log" in ${DIR}/feedback.md; an interrupted run then knows this rework is under way and waits for its own plan approval. Then read the ${source} items.
 
-Revise the plan to address them: fix plan-level issues in the existing phase files, and add new Phase-N.md files (numbered after the last existing phase) for implementation work. Tag new phases the same way as existing ones.
-
-Then record that the rework is planned, so an interrupted run resumes it instead of re-planning: ${state.finalVerdict === 'NO-GO'
-    ? 'move each FINAL_REVIEW item to "Resolved Feedback" with a resolution naming the phase that addresses it.'
-    : 'append the line REPLANNED under "## Verification".'}`, false)
+Revise the plan to address them: fix plan-level issues in the existing phase files, and add new Phase-N.md files (numbered after the last existing phase) for implementation work. Tag new phases the same way as existing ones.${state.finalVerdict === 'NO-GO'
+    ? ' Move each FINAL_REVIEW item you plan for to "Resolved Feedback" with a resolution naming the phase that addresses it.'
+    : ''}`, false)
   if (!plan.ok) return stopped(plan.why)
   planApproved = true
   // New phases start unreviewed; previously approved phases stay approved.
@@ -464,8 +462,8 @@ Conduct the final comprehensive review:
 4. Scan for security issues, dead code, and tech debt
 5. Produce the Production Readiness Dashboard
 
-If ready: record GO in feedback.md and signal GO.
-If not ready: write feedback to ${DIR}/feedback.md tagged FINAL_REVIEW, categorize issues as plan-level or implementation-level, and signal NO-GO.`), FINAL_REPORT, { label: 'final-reviewer', phase: 'Final gate' })
+If ready: log GO in feedback.md and signal GO.
+If not ready: write feedback to ${DIR}/feedback.md tagged FINAL_REVIEW, categorize issues as plan-level or implementation-level, log NO-GO, and signal NO-GO.`), FINAL_REPORT, { label: 'final-reviewer', phase: 'Final gate' })
   if (!f) return { verdict: 'ERROR', flow: FLOW, message: 'Final reviewer failed', history }
   history.push(`final review: ${f.signal}`)
   return ({
@@ -480,7 +478,7 @@ If not ready: write feedback to ${DIR}/feedback.md tagged FINAL_REVIEW, categori
 for (let cycle = 1; ; cycle++) {
   const v = await role('reviewer', task(`${VERIFY_TASK[FLOW]}
 
-Record the result in ${DIR}/feedback.md under a "## Verification" heading (add it if missing): the word VERIFIED or UNVERIFIED, and for UNVERIFIED the list of unverified items.`), VERIFY_REPORT, { label: `verification #${cycle}`, phase: 'Final gate' })
+Record the result in ${DIR}/feedback.md: log VERIFIED or UNVERIFIED as a line under "## Gate Log", and for UNVERIFIED list the unverified findings under a "## Verification" heading (add either heading if missing).`), VERIFY_REPORT, { label: `verification #${cycle}`, phase: 'Final gate' })
   if (!v) return { verdict: 'ERROR', flow: FLOW, message: 'Verification reviewer failed', history }
   history.push(`verification ${cycle}: ${v.signal}`)
   const loopBack = FLOW === 'audit' && v.signal === 'UNVERIFIED' && v.unverified.length >= 3 && cycle < MAX_VERIFY_CYCLES
@@ -493,13 +491,11 @@ Record the result in ${DIR}/feedback.md under a "## Verification" heading (add i
   }
   log(`${v.unverified.length} findings unverified: re-planning (cycle ${cycle + 1} of ${MAX_VERIFY_CYCLES})`)
   const before = new Set(phases.map(p => p.n))
-  const plan = await planLoop(`Verification found unverified items. Read ${DIR}/feedback.md for the UNVERIFIED findings under "## Verification".
+  const plan = await planLoop(`Verification found unverified items. First append the line REWORK under "## Gate Log" in ${DIR}/feedback.md. Then read the unverified findings under "## Verification".
 
 Create a NEW remediation plan addressing ONLY the unverified items. Previous plan files exist — create new Phase-N.md files starting after the last existing phase number.
 
-Tag every phase with [HYGIENIST], [IMPLEMENTER], [FORTIFIER], or [DOC-ENGINEER].
-
-Then append the line REPLANNED under "## Verification", so an interrupted run resumes these phases instead of re-planning.`, false)
+Tag every phase with [HYGIENIST], [IMPLEMENTER], [FORTIFIER], or [DOC-ENGINEER].`, false)
   if (!plan.ok) return stopped(plan.why)
   phases = plan.phases || phases
   impl = await runPhases(phases, n => (before.has(n) ? 'approved' : 'not-started'))

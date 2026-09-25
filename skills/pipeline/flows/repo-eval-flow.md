@@ -30,7 +30,7 @@ The intake skill produces `docs/plans/$ARGUMENTS/eval.md` with:
 
 Before starting any stage, detect prior progress:
 
-1. **Check feedback.md** for `VERIFIED` signal → pipeline already complete, report and stop
+1. **Check the `## Gate Log` in feedback.md**: a last verdict of `VERIFIED` (no `REWORK` line after it) → pipeline already complete, report and stop. Approvals and verdicts are read from this log (see `SKILL.md` Stage 0)
 2. **Check for plan files**: Glob for `docs/plans/$ARGUMENTS/Phase-*.md`
 3. **Check feedback.md** (if it exists):
    - `PHASE_APPROVED` for all phases → enter at Stage 4 (Verification)
@@ -176,8 +176,8 @@ If any targets unverified or tests fail: list the unverified items, then end wit
 
 The **orchestrator** must write the verification result to feedback.md **before** reporting to the user. This ensures state recovery can detect completion if interrupted.
 
-1. If agent returned `VERIFIED`: **Edit** feedback.md to append `VERIFIED` under a `## Verification` section
-2. If agent returned `UNVERIFIED`: **Edit** feedback.md to append `UNVERIFIED` with the list of unverified items under a `## Verification` section
+1. Confirm the verifier logged `VERIFIED` or `UNVERIFIED` as a line under `## Gate Log` in feedback.md; if it did not, **Edit** feedback.md to append it
+2. For `UNVERIFIED`, confirm the unverified items are listed under a `## Verification` section; add them if missing
 
 Then assess:
 - If `VERIFIED` → report success

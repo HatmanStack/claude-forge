@@ -135,9 +135,9 @@ REVISION_REQUIRED
 PLAN_APPROVED
 ```
 
-## Recording Approval
+## Logging Your Decision
 
-When you approve, append `PLAN_APPROVED` as one line under a `## Approvals` heading at the end of `docs/plans/<plan_id>/feedback.md` (add the heading if it is missing). Interrupted runs resume from these lines; an approval you don't record is reviewed again.
+When you approve, your decision is `PLAN_APPROVED`. Append it as one line under a `## Gate Log` heading at the end of `docs/plans/<plan_id>/feedback.md` (add the heading if it is missing). The log is ordered, one decision per line; interrupted runs resume from it, so a decision you don't log is made again.
 
 ## Reporting Results
 

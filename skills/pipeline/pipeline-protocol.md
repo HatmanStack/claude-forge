@@ -151,13 +151,14 @@ All review feedback lives in `docs/plans/<plan_id>/feedback.md`. Plan documents 
 
 ---
 
-## Approvals
+## Verification
+
+- [unverified finding — file:line — why it is still present]
+
+## Gate Log
 
 PLAN_APPROVED
 PHASE_APPROVED — Phase 1
-
-## Verification
-
 VERIFIED
 ```
 
@@ -168,8 +169,8 @@ VERIFIED
 - Tag feedback with `PLAN_REVIEW` or `CODE_REVIEW` so the correct generator knows which items are theirs
 - Reference specific files, line numbers, and test names
 - Use rhetorical questions (Consider / Think about / Reflect) -- don't provide answers
-- **Gates record approvals.** When a gate approves, it appends one line under `## Approvals`: the Plan Reviewer `PLAN_APPROVED`, a phase reviewer `PHASE_APPROVED — Phase N`, the Final Reviewer `GO`. Resume reads these lines, so an approval that isn't recorded is reviewed again
-- **Verification records its result** under `## Verification`: `VERIFIED`, or `UNVERIFIED` with the unverified findings
+- **Gates log decisions.** `## Gate Log` is an ordered, append-only log, one decision per line: the Plan Reviewer logs `PLAN_APPROVED`, a phase reviewer `PHASE_APPROVED — Phase N`, the Final Reviewer `GO` or `NO-GO`, the verifier `VERIFIED` or `UNVERIFIED` (listing unverified findings under `## Verification`). A rework begins by logging `REWORK`
+- **Resume reads the log in order.** The current verdict is the last `GO`/`NO-GO`/`VERIFIED`/`UNVERIFIED` line unless a `REWORK` line follows it; the plan is approved only if a `PLAN_APPROVED` line follows the last `REWORK`; a phase is done when its `PHASE_APPROVED — Phase N` line is present. A decision that isn't logged is made again
 
 ## File Ownership
 

@@ -308,7 +308,7 @@ test('open plan-review items resume the planner with the revision task, never th
   assert.doesNotMatch(first, /Brainstorm document|create the implementation plan/)
 })
 
-test('rework and audit re-plans record a marker so a paused run resumes instead of re-planning', async () => {
+test('rework and audit re-plans log REWORK before planning, so a paused run neither repeats the old verdict nor skips plan review', async () => {
   const nogo = await run({
     args: '2026-01-01-demo rework',
     state: { finalVerdict: 'NO-GO', planFilesExist: true, planApproved: true, phases: [{ n: 1, title: 'x', tag: 'NONE' }],
@@ -318,7 +318,7 @@ test('rework and audit re-plans record a marker so a paused run resumes instead 
       'plan-reviewer': ['PLAN_APPROVED'], 'final-reviewer': ['GO'],
     },
   })
-  assert.match(nogo.calls.find(c => c.name === 'planner').prompt, /FINAL_REVIEW item to "Resolved Feedback"/)
+  assert.match(nogo.calls.find(c => c.name === 'planner').prompt, /First append the line REWORK under "## Gate Log"/)
   const unverified = await run({
     args: '2026-01-01-demo rework',
     state: { intakeDocs: ['health-audit.md'], finalVerdict: 'UNVERIFIED', planFilesExist: true, planApproved: true,
@@ -328,8 +328,27 @@ test('rework and audit re-plans record a marker so a paused run resumes instead 
       'plan-reviewer': ['PLAN_APPROVED'], reviewer: ['VERIFIED'],
     },
   })
-  assert.match(unverified.calls.find(c => c.name === 'planner').prompt, /REPLANNED under "## Verification"/)
+  assert.match(unverified.calls.find(c => c.name === 'planner').prompt, /First append the line REWORK under "## Gate Log"/)
   const recover = nogo.calls.find(c => c.label === 'recover-state').prompt
-  assert.match(recover, /REPLANNED/)
-  assert.match(recover, /no PLAN_REVIEW item is OPEN/)
+  // Recovery reads one ordered log: a verdict followed by REWORK is not current,
+  // and only a PLAN_APPROVED after the last REWORK approves the reworked plan.
+  assert.match(recover, /NONE if there is none, or if a REWORK line comes after it/)
+  assert.match(recover, /PLAN_APPROVED line after its last REWORK line/)
+  assert.doesNotMatch(recover, /last line of/)
 })
+
+test('verifiers and the final reviewer log their verdicts in the gate log', async () => {
+  const feature = await run({
+    state: { planFilesExist: true, planApproved: true, phases: [{ n: 1, title: 'x', tag: 'NONE' }],
+      phaseStatus: [{ n: 1, status: 'approved' }] },
+    replies: { 'final-reviewer': ['NO-GO'] },
+  })
+  assert.match(feature.calls.find(c => c.name === 'final-reviewer').prompt, /log NO-GO/)
+  const audit = await run({
+    state: { intakeDocs: ['doc-audit.md'], planFilesExist: true, planApproved: true, phases: [{ n: 1, title: 'x', tag: 'NONE' }],
+      phaseStatus: [{ n: 1, status: 'approved' }] },
+    replies: { reviewer: [{ signal: 'UNVERIFIED', unverified: ['a'] }] },
+  })
+  assert.match(audit.calls.find(c => c.name === 'reviewer').prompt, /log VERIFIED or UNVERIFIED as a line under "## Gate Log"/)
+})
+

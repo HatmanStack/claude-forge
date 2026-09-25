@@ -96,9 +96,9 @@ Use rhetorical questions tagged `CODE_REVIEW` in `docs/plans/<plan_id>/feedback.
 - Issues found → write feedback, emit `CHANGES_REQUESTED`
 - Implementation good → emit `PHASE_APPROVED`
 
-## Recording Approval
+## Logging Your Decision
 
-When you approve, append `PHASE_APPROVED — Phase N` as one line under a `## Approvals` heading at the end of `docs/plans/<plan_id>/feedback.md` (add the heading if it is missing). Interrupted runs resume from these lines; an approval you don't record is reviewed again.
+When you approve a phase, your decision is `PHASE_APPROVED — Phase N`. Append it as one line under a `## Gate Log` heading at the end of `docs/plans/<plan_id>/feedback.md` (add the heading if it is missing). The log is ordered, one decision per line; interrupted runs resume from it, so a decision you don't log is made again.
 
 ## Reporting Results
 

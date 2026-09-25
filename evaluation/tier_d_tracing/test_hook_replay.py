@@ -256,7 +256,7 @@ def test_session_completes_at_session_end_covering_every_turn(hook, tmp_path):
     assert not _by_name(hook.spans(), "session_complete")  # Stop never ends a session
     hook(hook_event_name="SessionEnd")
     (done,) = _by_name(hook.spans(), "session_complete")
-    assert done.status.is_ok
+    assert done.status.status_code == StatusCode.OK
 
 
 def test_a_failed_turn_marks_the_session_error(hook, tmp_path):
@@ -264,7 +264,7 @@ def test_a_failed_turn_marks_the_session_error(hook, tmp_path):
     hook(hook_event_name="StopFailure")
     hook(hook_event_name="SessionEnd")
     (done,) = _by_name(hook.spans(), "session_complete")
-    assert not done.status.is_ok
+    assert done.status.status_code == StatusCode.ERROR
 
 
 def test_a_resumed_session_completes_again(hook, tmp_path):
@@ -274,6 +274,10 @@ def test_a_resumed_session_completes_again(hook, tmp_path):
     hook(hook_event_name="SessionEnd")
     hook(hook_event_name="SessionEnd")
     assert len(_by_name(hook.spans(), "session_complete")) == 2
+    # Two parallel assessors raise DP2 once per session, not once per completion.
+    assert len(_by_name(hook.spans(), "security:dp2.shared_model_fanout")) == 1
+    summary = json.loads((hook.state_dir / "trace-summary.json").read_text())
+    assert summary["security"]["counts"].get("dp2") == 1
 
 def test_session_state_is_private(hook, tmp_path):
     _run_parallel_intake(hook, tmp_path)

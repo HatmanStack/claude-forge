@@ -838,11 +838,23 @@ def _security_session_summary(state_dir, root_carrier, span, end_ns):
         data = _security_state(state_dir)
         roles = data.get("roles") or []
         timeline = data.get("timeline") or []
+        # A resumed session emits session_complete again; each session-level
+        # finding is raised once, or its counts and trace-summary.json double.
+        raised = set(data.get("session_findings") or [])
+
+        def once(key):
+            if key in raised:
+                return False
+            raised.add(key)
+            state = _security_state(state_dir)
+            state["session_findings"] = sorted(raised)
+            _write_security_state(state_dir, state)
+            return True
 
         # DP2 — correlated-compromise precondition: multiple read-only assessors
         # fanned out over the same input on the shared session model.
         assessor_runs = sum(1 for r in roles if r in _ASSESSOR_ROLES)
-        if assessor_runs >= 2:
+        if assessor_runs >= 2 and once("dp2:shared_model_fanout"):
             _emit_security(
                 root_carrier,
                 state_dir,
@@ -862,7 +874,7 @@ def _security_session_summary(state_dir, root_carrier, span, end_ns):
             a["adv"] += len(t.get("advance") or [])
             a["neg"] += len(t.get("neg") or [])
         for r, a in agg.items():
-            if r in _REVIEWER_ROLES and a["neg"] >= 3 and a["adv"] == 0:
+            if r in _REVIEWER_ROLES and a["neg"] >= 3 and a["adv"] == 0 and once(f"dp5:decision_starvation:{r}"):
                 _emit_security(
                     root_carrier,
                     state_dir,

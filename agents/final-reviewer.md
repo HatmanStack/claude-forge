@@ -187,9 +187,9 @@ If the verdict is `NO-GO`:
    - **Implementation-level** (bug, missing test, security issue) → routes back to Implementer
 3. Emit `NO-GO` with a summary indicating which role should address each issue
 
-## Recording Approval
+## Logging Your Decision
 
-When you approve, append `GO` as one line under a `## Approvals` heading at the end of `docs/plans/<plan_id>/feedback.md` (add the heading if it is missing). Interrupted runs resume from these lines; an approval you don't record is reviewed again.
+Your decision is `GO` or `NO-GO`; log it either way. Append it as one line under a `## Gate Log` heading at the end of `docs/plans/<plan_id>/feedback.md` (add the heading if it is missing). The log is ordered, one decision per line; interrupted runs resume from it, so a decision you don't log is made again.
 
 ## Reporting Results
 

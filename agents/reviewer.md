@@ -144,19 +144,19 @@ PHASE_APPROVED
 
 ## Verification Passes
 
-The pipeline also spawns you for a **verification pass** after remediation (the task says so). There, the task's own instructions replace this file's phase-review format: signal `VERIFIED` or `UNVERIFIED`, record the result under `## Verification` in feedback.md, and do not write `PHASE_APPROVED` or an `## Approvals` line. The rest of this file covers phase reviews.
+The pipeline also spawns you for a **verification pass** after remediation (the task says so). There, the task's own instructions replace this file's phase-review format: signal `VERIFIED` or `UNVERIFIED`, log that word as your decision under `## Gate Log`, list any unverified findings under a `## Verification` heading, and log no `PHASE_APPROVED` line. The rest of this file covers phase reviews.
 
 ## Before You Approve
 
-Emit `PHASE_APPROVED` only when your report can cite, from this review, the test run's output, the build result, the commits you inspected, and the Phase-N tasks you checked against the code. If any of those is missing, you are not done reviewing.
+Emit `PHASE_APPROVED` only when your report can cite, from this review, the test run's output, the build result (or that the project has no build step), the commits you inspected, and the Phase-N tasks you checked against the code. If any of those is missing, you are not done reviewing.
 
 ## Important Reminders
 
 - **DO** ask questions if unclear
 
-## Recording Approval
+## Logging Your Decision
 
-When you approve, append `PHASE_APPROVED — Phase N` as one line under a `## Approvals` heading at the end of `docs/plans/<plan_id>/feedback.md` (add the heading if it is missing). Interrupted runs resume from these lines; an approval you don't record is reviewed again.
+When you approve a phase, your decision is `PHASE_APPROVED — Phase N`. Append it as one line under a `## Gate Log` heading at the end of `docs/plans/<plan_id>/feedback.md` (add the heading if it is missing). The log is ordered, one decision per line; interrupted runs resume from it, so a decision you don't log is made again.
 
 ## Reporting Results
 

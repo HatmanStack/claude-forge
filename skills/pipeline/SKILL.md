@@ -49,12 +49,15 @@ Each pipeline type uses a distinct intake filename — no frontmatter parsing ne
 
 Before starting any stage, detect prior progress to determine the correct entry point:
 
-1. **Check for plan approval**: Read `docs/plans/$ARGUMENTS/feedback.md` (if it exists) for a `PLAN_APPROVED` signal or resolved `PLAN_REVIEW` entries with no remaining OPEN `PLAN_REVIEW` items
-2. **Check for phase progress**: Look for `PHASE_APPROVED`, OPEN/resolved `CODE_REVIEW` entries, and implementation commits (see Stage 2 State Recovery)
-3. **Check for final review**: Look for `GO` or `NO-GO` entries tagged `FINAL_REVIEW`
+Gates log each decision as one line under `## Gate Log` in `docs/plans/$ARGUMENTS/feedback.md`, oldest first; a rework starts with a `REWORK` line.
+
+1. **Check for plan approval**: the log has a `PLAN_APPROVED` line after its last `REWORK` line (or has no `REWORK` line), and no `PLAN_REVIEW` item is OPEN
+2. **Check for phase progress**: `PHASE_APPROVED — Phase N` lines in the log, OPEN/resolved `CODE_REVIEW` entries, and implementation commits (see Stage 2 State Recovery)
+3. **Check for final review**: the last `GO` or `NO-GO` line in the log, unless a `REWORK` line follows it
 
 Based on findings:
-- `GO` or `NO-GO` in feedback.md → pipeline already completed, report result to user and stop
+- `GO` logged → pipeline already completed, report the result to the user and stop
+- `NO-GO` logged (no `REWORK` after it) → report it and follow the NO-GO Re-Entry Path below
 - `PHASE_APPROVED` for all phases → skip to Stage 3 (Final Review)
 - Any phase progress exists + `PLAN_APPROVED` → skip to Stage 2 at the correct phase (see State Recovery below)
 - Plan files exist + OPEN `PLAN_REVIEW` feedback → enter Stage 1 at revision step (1a with revision instructions)
@@ -156,14 +159,14 @@ Identify all phases by using **Glob** for `docs/plans/$ARGUMENTS/Phase-*.md` (ex
 Before processing phases, determine each phase's completion state. For each Phase-N:
 
 1. **Read** `docs/plans/$ARGUMENTS/feedback.md` and check for:
-   - A `PHASE_APPROVED` entry for Phase N → phase is **done**, skip it
+   - A `PHASE_APPROVED — Phase N` line in the Gate Log → phase is **done**, skip it
    - OPEN `CODE_REVIEW` items for Phase N → phase needs **review fixes**, enter at step 2a (Implementer) with revision instructions
    - Resolved `CODE_REVIEW` items for Phase N but no `PHASE_APPROVED` → phase needs **re-review**, enter at step 2b (Reviewer)
 2. **Check** `git log --oneline` for commits referencing Phase N (e.g., `phase-N`, `Phase N`, `phase N`)
    - Commits exist but no feedback.md review entries → phase was **implemented but never reviewed**, enter at step 2b (Reviewer)
    - No commits and no feedback entries → phase is **not started**, enter at step 2a (Implementer)
 
-A phase is only skip-eligible when feedback.md contains a `PHASE_APPROVED` record for it. Implementation commits alone are not sufficient.
+A phase is only skip-eligible when the Gate Log has a `PHASE_APPROVED — Phase N` line for it. Implementation commits alone are not sufficient.
 
 Report the recovered state to the user before continuing:
 ```text
@@ -340,7 +343,7 @@ C) Ship with caveats (if issues are minor)
 - **Implementation-level issues** (bug, missing test, security): Re-enter at Stage 2 at the affected phase(s), spawning the Implementer with `FINAL_REVIEW` feedback items as `CODE_REVIEW` rework
 - **Mixed issues**: Plan-level first, then implementation-level
 
-The orchestrator should update the `NO-GO` status in feedback.md to `REWORK_IN_PROGRESS` to distinguish active rework from a fresh pipeline run.
+When rework starts, the orchestrator appends `REWORK` under `## Gate Log`, so an interrupted run resumes the rework rather than reporting the old NO-GO, and waits for the reworked plan's own `PLAN_APPROVED`.
 
 ### On Max Iterations Reached
 

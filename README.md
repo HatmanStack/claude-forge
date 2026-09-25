@@ -96,7 +96,7 @@ A workflow cannot stop to ask you anything, so `/forge:run` ends with a verdict 
 
 **`/forge:pipeline`** orchestrates in your conversation: the main session spawns each role, continues it with `SendMessage` across iterations, and stops to ask you at NO-GO or unverified findings. Use it when workflows are unavailable, or when you want to steer between stages.
 
-**Resume** either way by re-running with the same plan id. Both read the plan's state from `docs/plans/<plan-id>/`: plan and phase files, open review items, and the approvals the gates record under `## Approvals` in `feedback.md`. Approved phases are skipped; a phase with open feedback resumes at its implementer, one awaiting review at its reviewer.
+**Resume** either way by re-running with the same plan id. Both read the plan's state from `docs/plans/<plan-id>/`: plan and phase files, open review items, and the ordered `## Gate Log` in `feedback.md`, where every gate logs its decision. Approved phases are skipped; a phase with open feedback resumes at its implementer, one awaiting review at its reviewer.
 
 ## Pipeline Flows
 
