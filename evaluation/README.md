@@ -89,6 +89,8 @@ agent adds over plain Claude.
 | Case | Fixture | Graded on |
 |------|---------|-----------|
 | `reviewer-catches-spec-violation` | Phase 1 committed; its tests pass, but truncation can leave a trailing hyphen, which the spec forbids and no test covers | the violation is named in `feedback.md` (LLM judge); `CHANGES_REQUESTED`; no edits or new files under `src/` or `tests/` |
+| `reviewer-catches-standards-violation` | Meets the spec, tests pass, but prints from library code and swallows errors against Phase-0 | both violations named in `feedback.md` (LLM judge); `CHANGES_REQUESTED`; source untouched |
+| `reviewer-approves-clean-phase` | Correct, fully tested, conventional (tag `needs-bash`) | `PHASE_APPROVED`, no `OPEN` items, no change request; source untouched |
 
 ```bash
 # from the repo root; --scaffold runs the case's own fixture script
@@ -98,3 +100,35 @@ claude plugin eval . --scaffold --allow-tools Bash Edit
 Granting `Bash` requires Claude Code's OS sandbox (on Linux: `bubblewrap` and
 `socat`). Without it, grant only `Edit`: the reviewer then reviews by reading,
 without running the tests.
+
+### Measured: splitting the reviewer
+
+Matt Pocock's `/code-review` splits review into a standards check and a spec
+check, run as separate agents "so neither pollutes the other". We measured the
+same split for Forge's reviewer on 2026-09-24: `spec-reviewer` (checklist items
+spec match, tests, correctness) and `standards-reviewer` (build, commits, code
+quality, security), each with its own lens and completion criterion, run in
+parallel with a combined verdict. The variant lives on the
+`experiment/split-reviewer` branch; the cases are identical apart from the
+prompt naming the agents.
+
+3 runs per case, Opus reviewers, `Edit` granted, no Bash (no sandbox on the
+host):
+
+| Case | Single reviewer | Split pair |
+|------|-----------------|-----------|
+| Spec violation caught | 3/3 | 3/3 |
+| Both standards violations caught | 3/3 | 3/3 |
+| Cost per review | ~$0.18 | ~$0.32 |
+| Wall time per review | ~40 s | ~48 s |
+| Clean phase approved | not measurable without Bash | not measurable without Bash |
+
+The split catches nothing the single reviewer misses, at 1.8x the cost, so
+Forge keeps one reviewer. The clean-phase case did its job anyway: both
+variants refused to approve without having run the tests (the completion
+criterion), and the first version of the fixture turned out to have a real
+bug (it lowercased before filtering, so the Kelvin sign became `k`), which
+both variants found. Re-run with `--allow-tools Bash Edit` on a host with the
+sandbox to measure false positives; revisit the split when a case exists that
+the single reviewer misses.
+

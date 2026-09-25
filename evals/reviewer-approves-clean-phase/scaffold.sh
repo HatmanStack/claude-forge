@@ -29,7 +29,9 @@ Rules:
 1. Strip leading and trailing hyphens.
 1. Truncate to at most `max_length` characters. The result never ends with a hyphen.
 
-Write a test for each rule.
+Scope: only ASCII letters and digits are kept; every other character, including non-ASCII letters such as `é`, is a separator. `max_length` is a positive integer; callers guarantee it, so the function does not validate it.
+
+Write a test for each rule, and one for the default `max_length`.
 MD
 
 cat > "$PLAN/feedback.md" <<'MD'
@@ -47,7 +49,9 @@ import re
 
 
 def slugify(text, max_length=50):
-    slug = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+    # Filter before lowercasing: some non-ASCII characters lowercase to ASCII
+    # letters (the Kelvin sign becomes "k"), and the spec makes them separators.
+    slug = re.sub(r"[^A-Za-z0-9]+", "-", text).lower().strip("-")
     return slug[:max_length].rstrip("-")
 PY
 
@@ -72,6 +76,15 @@ class SlugifyTest(unittest.TestCase):
 
     def test_truncation_never_ends_with_hyphen(self):
         self.assertEqual(slugify("Hello World", max_length=6), "hello")
+
+    def test_non_ascii_letters_are_separators(self):
+        self.assertEqual(slugify("Café au lait"), "caf-au-lait")
+
+    def test_non_ascii_that_lowercases_to_ascii_is_a_separator(self):
+        self.assertEqual(slugify("\u212a1"), "1")
+
+    def test_default_max_length_is_50(self):
+        self.assertEqual(len(slugify("a" * 80)), 50)
 
 
 if __name__ == "__main__":
