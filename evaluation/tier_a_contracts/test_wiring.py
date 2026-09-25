@@ -74,3 +74,17 @@ def test_skills_are_user_invoked():
         assert str(fm.get("disable-model-invocation")).lower() == "true", (
             f"{skill.parent.name} must set disable-model-invocation: true"
         )
+
+
+def test_workflow_model_pins_match_agent_frontmatter():
+    """workflows/run.js repeats each role's model so a session on another model
+    never changes who does the work; the two pins must agree."""
+    import re
+
+    src = (registry.REPO_ROOT / "workflows" / "run.js").read_text()
+    block = re.search(r"const MODEL = \{(.*?)\n\}", src, re.S).group(1)
+    pins = dict(re.findall(r"'?([a-z-]+)'?: '(opus|sonnet|haiku)'", block))
+    agents = {a["name"]: a["frontmatter"].get("model") for a in registry.load_agents()}
+    spawned = {r for r in agents if r not in {"eval-hire", "eval-stress", "eval-day2",
+                                              "health-auditor", "doc-auditor"}}
+    assert pins == {r: agents[r] for r in spawned}

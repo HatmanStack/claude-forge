@@ -94,11 +94,19 @@ Use rhetorical questions tagged `CODE_REVIEW` in `docs/plans/<plan_id>/feedback.
 - Issues found → write feedback, emit `CHANGES_REQUESTED`
 - Implementation good → emit `PHASE_APPROVED`
 
+## Recording Approval
+
+When you approve, append `PHASE_APPROVED — Phase N` as one line under a `## Approvals` heading at the end of `docs/plans/<plan_id>/feedback.md` (add the heading if it is missing). Interrupted runs resume from these lines; an approval you don't record is reviewed again.
+
 ## Reporting Results
 
-You run as a **teammate agent**. Your plain-text response is **not** delivered to
-the orchestrator — it is discarded. Calling `SendMessage` is the only way to
-report.
+**In a `/forge:run` workflow** you have a `StructuredOutput` tool: call it once
+with your full report and put your signal in its `signal` field. That is your
+only channel there; do not call `SendMessage`.
+
+**Otherwise** you run as a **teammate agent**. Your plain-text response is **not**
+delivered to the orchestrator — it is discarded. Calling `SendMessage` is the
+only way to report.
 
 When your work is finished, call:
 

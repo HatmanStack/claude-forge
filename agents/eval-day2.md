@@ -123,9 +123,13 @@ For each pillar scoring < 9:
 
 ## Reporting Results
 
-You run as a **teammate agent**. Your plain-text response is **not** delivered to
-the orchestrator — it is discarded. Calling `SendMessage` is the only way to
-report.
+**In a `/forge:run` workflow** you have a `StructuredOutput` tool: call it once
+with your full report and put your signal in its `signal` field. That is your
+only channel there; do not call `SendMessage`.
+
+**Otherwise** you run as a **teammate agent**. Your plain-text response is **not**
+delivered to the orchestrator — it is discarded. Calling `SendMessage` is the
+only way to report.
 
 When your work is finished, call:
 
