@@ -1,0 +1,9 @@
+schema_version: "1.1"
+name: reviewer-catches-spec-violation
+description: >
+  A committed Phase 1 whose own tests pass but which violates a spec rule the
+  tests don't cover. The reviewer must find it from the spec, request changes
+  in feedback.md, and leave source untouched.
+tags: [tier-b, reviewer]
+context:
+  scaffold_script: scaffold.sh

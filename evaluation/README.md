@@ -7,7 +7,7 @@ deterministic at the base, realistic at the top.
 | Tier | What | Where | Cadence |
 |------|------|-------|---------|
 | **A — Contracts** | Deterministic structural checks (frontmatter, tool policy, wiring, manifests) | `tier_a_contracts/` | Every push / PR |
-| **B — Single agent** | Rubric checks of one agent against fixtures (the agent's own reviewer is its rubric) | _planned_ | Nightly (LLM-costed) |
+| **B — Single agent** | `claude plugin eval` cases: one agent against a scaffolded fixture, scored against a no-plugin baseline | `../evals/` | On demand (LLM-costed) |
 | **C — Trajectory** | Governance-signal order validators (provenance, gate order, no skipped review) | `tier_c_trajectory/` + `check_run.py` | Synthetic per-PR; real runs nightly |
 | **D — Live traces** | OpenTelemetry → Jaeger, plus `security:dp{1..5}.*` spans; a replay of recorded hook events guards the hook itself | `../hooks/trace_subagents.py`, `tier_d_tracing/` | Replay per-PR; traces on real runs |
 
@@ -78,3 +78,23 @@ its own anchor, results come from `SubagentStop` with the agent's
 `SendMessage(to="main")` report, a resume is a second segment on the same
 anchor, a forged gate signal raises `security:dp3.signal_forgery`, and
 `session_complete` waits until no background work is in flight.
+
+## Tier B — plugin evals
+
+`../evals/` holds [`claude plugin eval`](https://code.claude.com/docs/en/plugin-evals)
+cases. Each scaffolds a small repo, asks for one Forge agent, and grades the
+outcome; every case also runs without the plugin, so the report shows what the
+agent adds over plain Claude.
+
+| Case | Fixture | Graded on |
+|------|---------|-----------|
+| `reviewer-catches-spec-violation` | Phase 1 committed; its tests pass, but truncation can leave a trailing hyphen, which the spec forbids and no test covers | the violation is named in `feedback.md` (LLM judge); `CHANGES_REQUESTED`; no edits or new files under `src/` or `tests/` |
+
+```bash
+# from the repo root; --scaffold runs the case's own fixture script
+claude plugin eval . --scaffold --allow-tools Bash Edit
+```
+
+Granting `Bash` requires Claude Code's OS sandbox (on Linux: `bubblewrap` and
+`socat`). Without it, grant only `Edit`: the reviewer then reviews by reading,
+without running the tests.
