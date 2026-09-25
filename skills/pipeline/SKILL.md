@@ -83,12 +83,12 @@ Read the brainstorm document, explore the codebase, and create the implementatio
 
 Remember to create feedback.md with the empty template structure.
 
-When complete, end your response with: PLAN_COMPLETE
+When complete, report with: PLAN_COMPLETE
 </task>
 ```
 
-- Wait for the agent to complete
-- Verify `PLAN_COMPLETE` is in the result
+- Wait for the planner's `SendMessage` report — the `Agent` call returns at spawn and never carries it (see `pipeline-protocol.md` → *Signals Arrive by Message, Not by Return Value*)
+- Verify `PLAN_COMPLETE` is the report's final line
 
 ### 1b: Spawn Plan Reviewer (once)
 
@@ -117,7 +117,7 @@ The Plan Reviewer has requested revisions. Read docs/plans/$ARGUMENTS/feedback.m
 
 Address each item by revising the plan files. Move resolved feedback to the "Resolved Feedback" section with a resolution note.
 
-When complete, end your response with: PLAN_COMPLETE
+When complete, report with: PLAN_COMPLETE
 ```
 
 - After the planner responds, use **SendMessage** with `to="plan-reviewer"`:
@@ -193,7 +193,7 @@ Read these files in order:
 
 Implement all tasks in Phase-N following TDD. Make atomic commits.
 
-When complete, end your response with: IMPLEMENTATION_COMPLETE
+When complete, report with: IMPLEMENTATION_COMPLETE
 </task>
 ```
 
@@ -229,7 +229,7 @@ The Code Reviewer has requested changes. Read docs/plans/$ARGUMENTS/feedback.md 
 
 Address each item. Move resolved feedback to "Resolved Feedback" with a resolution note. Continue following TDD.
 
-When complete, end your response with: IMPLEMENTATION_COMPLETE
+When complete, report with: IMPLEMENTATION_COMPLETE
 ```
 
 - After the implementer responds, use **SendMessage** with `to="reviewer-phase-N"`:
@@ -359,12 +359,11 @@ B) Manually resolve and continue
 
 ### Agent Spawning
 
-- **ONE agent at a time.** Every stage runs a single foreground agent. Wait for it to complete fully before deciding the next step.
+- **ONE agent at a time.** Every stage runs a single agent. Wait for its `SendMessage` report before deciding the next step.
 - **ONE Implementer and ONE Reviewer per phase.** Spawn each once with the role's `subagent_type` and canonical `name` from `pipeline-protocol.md`, then use `SendMessage(to="<name>")` for subsequent iterations. Never spawn a new agent for the same role within a phase. Never address by role description — use the exact `name` you spawned with.
 - **NO duplicate or replacement agents.** If an agent is slow, wait. Agents can take 20+ minutes on large codebases. Do NOT spawn a second agent for the same work.
 - **NO per-phase planners.** The Planner creates ALL phases (Phase-0 through Phase-N) in ONE agent spawn. Never decompose planning into separate agents per phase.
 - **NO parallel agents.** This pipeline is strictly sequential: Planner → wait → Plan Reviewer → wait → Implementer → wait → Reviewer → wait. Never overlap stages.
-- **NO background agents.** Every agent spawn must be foreground. Wait for the result before proceeding.
 
 ### Pipeline Integrity
 
