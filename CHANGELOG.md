@@ -5,6 +5,49 @@ All notable changes to Claude Forge will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2026-09-25
+
+### Breaking
+
+- **Tracing attributes follow the OpenTelemetry GenAI conventions.** `agent.tokens.*` is now `gen_ai.usage.*`; update saved Jaeger queries and dashboards.
+- **Tracing hook wiring changed.** New events (`SubagentStart`, `SubagentStop`), narrower tool matchers, async hooks, a `SessionEnd` timeout, and no `Stop` hook. Re-run `forge-trace` (or `bin/install-tracing.sh`) in each traced project.
+- **Skills are user-invoked** (`disable-model-invocation: true`). Claude no longer starts a Forge skill on its own; type the command.
+- **`feedback.md` records gate decisions in an ordered `## Gate Log`.** Plans in progress from 1.x have none, so a resumed run re-reviews phases approved before the upgrade.
+
+### Added
+
+- **`/forge:run`: the pipeline as a Workflow script** (`workflows/run.js`). The script owns what the `/forge:pipeline` skill left to the orchestrating model: loop limits, resume entry points, phase-tag routing, the final gate, and the unified audit's re-plan of unverified findings. Every role returns a typed report (`StructuredOutput`), so a verdict is a schema field the script branches on; a gate that didn't run can't produce one. Runs in the background (`/workflows`), needs no Agent Teams flag, and ends with a verdict (`GO`, `NO-GO`, `VERIFIED`, `UNVERIFIED`, `MAX_ITERATIONS`); smoke-tested end to end on a one-phase feature plan (GO, every agent on its pinned model); `/forge:run <plan-id> rework` re-enters after a NO-GO or UNVERIFIED. Flow-specific planner and verifier instructions are carried over verbatim from the skill's flow files. The `/forge:pipeline` skill remains for sessions without workflows or when you want to steer between stages.
+- **Gates log their decisions** in an ordered `## Gate Log` in `feedback.md` (`PLAN_APPROVED`, `PHASE_APPROVED — Phase N`, `GO`/`NO-GO`, `VERIFIED`/`UNVERIFIED`; a rework starts with `REWORK`). Resume logic in the skill and every flow already checked `feedback.md` for approvals, but nothing wrote them, so a resumed run could not tell an approved phase from an unreviewed one. One ordered log also lets a paused rework resume without repeating the old verdict or skipping review of the reworked plan.
+- **Tier C workflow trajectories** (`evaluation/tier_c_trajectory/workflow_run.test.mjs`): the workflow script runs against scripted agent replies to check gate order, loop limits, resume entry points, tag routing, and model pins; runs in CI.
+- **Reviewer eval cases** for a standards violation and a clean phase, and a **measured A/B of splitting the reviewer** into spec and standards reviewers: equal detection (3/3 each) at 1.8x the cost, so Forge keeps one reviewer (method and numbers in `evaluation/README.md`).
+
+### Fixed
+
+- **Tracing recorded launch receipts as results.** With Agent Teams on, the `Agent` tool returns at spawn (`status: async_launched`), so every `subagent_result` span had ~0ms duration, no tokens, no inner tool spans, and the security pass analyzed the launch receipt instead of the agent's report. The hook now completes agents on `SubagentStop`, one span per run segment (spawn or `SendMessage` resume), carrying the agent's `SendMessage(to="main")` report; `agent.reported=false` flags an agent that stopped without reporting.
+- **Parallel agents shared one parent span.** Inner tool spans hung off a single `_current_agent.json`, so the `/repo-eval` and `/audit` evaluator fan-out attributed tools to whichever agent spawned last. Spans are now keyed by the `agent_id` Claude Code stamps on every hook fired inside a subagent. Tool hooks now fire inside subagents, so the transcript-scraping workaround for anthropics/claude-code#34692 is gone.
+- **`session_complete` fired mid-run and covered only the first turn.** It fired at the first `Stop`, which comes at the end of every turn, including turns that end while agents run in the background. Later turns never updated it, and a later `StopFailure` was lost. It is now emitted once at `SessionEnd`, covering every turn; `StopFailure` marks it ERROR; a resumed session completes again. `trace-summary.json` is rewritten after every agent run segment, so it is current even mid-run.
+- **`/pipeline` contradicted the 1.12.0 reporting contract.** `pipeline/SKILL.md` still told the orchestrator to verify signals "in the result", keep every agent in the foreground, and have agents "end your response with" a signal. It now waits for each agent's `SendMessage` report.
+- Removed the stale root `settings.local.json.example` (it matched the pre-rename `Task` tool).
+- **Tracing lost the session summary on exit.** Claude Code kills `SessionEnd` hooks after 1.5 s unless they set a timeout, so `session_complete` (usage totals, security summary) never exported. The installer now gives the `SessionEnd` hook 10 s.
+- **DP1 flagged Claude Code's own `<system-reminder>` tags** as injected instructions, so every agent that read a file raised `security:dp1.injected_instruction`. The pattern now excludes them.
+- **Tracing now captures `/forge:run` reports.** Workflow agents report through `StructuredOutput`, not `SendMessage`; the hook records both, so `agent.reported` and the security checks work under either runner.
+
+### Changed
+
+- **Every role pins a `model`.** Discriminators and the Planner run on `opus`; code generators and read-only assessors on `sonnet`. Unpinned agents inherited the session model. Enforced by Tier A.
+- **Every skill is user-invoked** (`disable-model-invocation: true`), so skill descriptions no longer load into every session and the model cannot start a multi-agent run on its own. Enforced by Tier A.
+- **Agent prompts pruned** with the no-op test: dead `pipeline-protocol.md` pointers (unreachable from a plugin install), tool lists restating frontmatter, and duplicated recaps and diagrams (280 lines across 15 roles). The reviewer's pre-approval check is now a checkable completion criterion.
+- **Tracing attributes follow the OpenTelemetry GenAI conventions:** `gen_ai.operation.name` (`invoke_agent` / `execute_tool`), `gen_ai.agent.*`, `gen_ai.tool.*`, and `gen_ai.usage.*`, which replaces `agent.tokens.*` (see Breaking).
+- **Tracing is cheaper and safer.** Tool hooks match only traced tools (`--all-tools` widens them); every event except `PreToolUse`, `SubagentStart`, and `SessionEnd` runs as an async hook; OpenTelemetry loads only for events that emit. OTLP endpoint, headers, and TLS come from standard `OTEL_*` variables (no more unconditional plaintext). Session state is `0700`/`0600` with atomic writes and locking. The root span is named after the prompt.
+- `ruff.toml` pins line length 100 to match the existing code.
+- **Every role's Reporting Results covers both channels**: `StructuredOutput` inside `/forge:run`, `SendMessage(to="main")` as a teammate under the skills.
+- **Intake skills hand off to `/forge:run`**, and the README, architecture, protocol, and evaluation docs describe both runners. The Agent Teams flag is now documented as required for the skills only.
+
+### Added
+
+- **Tier B plugin evals** (`evals/`, run with `claude plugin eval`): `reviewer-catches-spec-violation` scores the reviewer against a no-plugin baseline on a fixture whose tests pass but whose code violates the spec.
+- **Tier D hook replay** (`evaluation/tier_d_tracing/`): recorded Agent Teams hook-event shapes replayed through the trace hook into an in-memory exporter; runs in CI.
+
 ## [1.12.0] - 2026-07-27
 
 ### Added

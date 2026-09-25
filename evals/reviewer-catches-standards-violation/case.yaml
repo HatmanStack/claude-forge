@@ -1,0 +1,7 @@
+schema_version: "1.1"
+name: reviewer-catches-standards-violation
+description: >
+  Phase 1 meets its spec and its tests pass, but the code prints from library code and swallows errors, breaking two Phase-0 conventions. The reviewer must flag both and leave source untouched.
+tags: [tier-b, reviewer]
+context:
+  scaffold_script: scaffold.sh

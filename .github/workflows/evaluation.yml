@@ -46,8 +46,31 @@ jobs:
         run: python -m pip install --quiet pytest
       - name: Run Tier C trajectory checks
         run: python -m pytest evaluation/tier_c_trajectory -v --tb=short --junitxml=eval_results/tier_c.xml
+      - name: Run workflow trajectory checks
+        run: node --test evaluation/tier_c_trajectory/workflow_run.test.mjs
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: tier-c-results
           path: eval_results/tier_c.xml
+
+  # Tier D — replay recorded hook events through the trace hook into an
+  # in-memory span exporter. No network, no LLM.
+  tier-d-tracing:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - name: Install test deps
+        run: python -m pip install --quiet pytest opentelemetry-sdk opentelemetry-exporter-otlp-proto-grpc
+      - name: Run Tier D hook replay
+        run: python -m pytest evaluation/tier_d_tracing -v --tb=short --junitxml=eval_results/tier_d.xml
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: tier-d-results
+          path: eval_results/tier_d.xml

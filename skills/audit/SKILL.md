@@ -1,6 +1,7 @@
 ---
 name: audit
-description: Run one or more codebase audits (evaluation, health, documentation) with parallel agent execution, producing intake docs for a single /pipeline run.
+description: Run any mix of repo-eval, repo-health and doc-health audits in parallel, producing one plan directory for a single /forge:run.
+disable-model-invocation: true
 allowed-tools: Agent, Read, Write, Glob, Grep, Bash
 ---
 
@@ -87,7 +88,7 @@ B) Full repo, no exclusions
 C) Specific directories only (tell me which to include or exclude)
 ```
 
-1. Pillar overrides — by default, the pipeline remediates until all 12 pillars hit 9/10. Some pillars (like Creativity) may not be improvable through code changes. Override lets you set a lower threshold or exclude a pillar from the remediation gate entirely.
+1. Pillar overrides — by default, every pillar below 9/10 gets remediation targets, and the pipeline verifies those targets were addressed (it does not re-score). Some pillars (like Creativity) may not be improvable through code changes. Override lets you set a lower threshold or exclude a pillar from the remediation gate entirely.
 
 The 12 pillars are:
 - **Hire lens:** Problem-Solution Fit, Architecture, Code Quality, Creativity
@@ -331,7 +332,9 @@ Intake docs produced:
 - [doc-audit.md — X drift, Y gaps, Z stale, W broken links]
 
 To remediate, run:
-/pipeline YYYY-MM-DD-audit-slug
+/forge:run YYYY-MM-DD-audit-slug
+
+(Standalone install: /run YYYY-MM-DD-audit-slug. To orchestrate in this session instead: /forge:pipeline YYYY-MM-DD-audit-slug.)
 
 The pipeline will create one unified plan across all audit types.
 ```
@@ -342,7 +345,7 @@ The pipeline will create one unified plan across all audit types.
 - **DO** ask follow-up questions one at a time, waiting for each answer
 - **DO NOT** prompt the user again after all questions are answered — run all agents autonomously
 - **DO NOT** start remediation — your only output is the intake docs
-- **DO NOT** re-run evaluator or auditor agents after writing the intake docs — they run exactly once during this skill. Re-evaluation happens later in `/pipeline` after all remediation is complete.
+- **DO NOT** re-run evaluator or auditor agents after writing the intake docs — they run exactly once during this skill. Re-evaluation happens later, in the pipeline's verification stage.
 - **DO** spawn each evaluator/auditor by its subagent_type (e.g. forge:eval-hire); the subagent definition supplies the prompt
 - **DO** produce all intake docs in the same plan directory
 - **DO** report results after each audit completes

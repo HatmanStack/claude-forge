@@ -1,0 +1,7 @@
+schema_version: "1.1"
+name: reviewer-approves-clean-phase
+description: >
+  Phase 1 is correct, fully tested, and follows every Phase-0 convention. The reviewer must approve it without raising open feedback; this case catches false positives. Needs Bash granted: a reviewer that cannot run the tests rightly refuses to approve.
+tags: [tier-b, reviewer, needs-bash]
+context:
+  scaffold_script: scaffold.sh

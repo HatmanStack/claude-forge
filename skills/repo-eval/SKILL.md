@@ -1,6 +1,7 @@
 ---
 name: repo-eval
-description: Evaluate a codebase across 12 pillars (hire, stress, day 2) using 3 parallel evaluator agents, then produce an eval doc for /pipeline remediation.
+description: Score the codebase on 12 pillars with a 3-evaluator hiring panel and write eval.md for /forge:run remediation.
+disable-model-invocation: true
 allowed-tools: Agent, Read, Write, Glob, Grep, Bash
 ---
 
@@ -64,7 +65,7 @@ B) Full repo, no exclusions
 C) Specific directories only (tell me which to include or exclude)
 ```
 
-**Question 5** — Pillar overrides. By default, `/pipeline` remediates until all 12 pillars hit 9/10. Some pillars may not be improvable through code changes. The 12 pillars are:
+**Question 5** — Pillar overrides. By default, every pillar scoring below 9/10 gets remediation targets. The pipeline plans and implements fixes for those targets, then verifies each target was addressed; it does not re-run the evaluators, so it confirms the targets, not new scores. Some pillars may not be improvable through code changes. The 12 pillars are:
 - **Hire lens:** Problem-Solution Fit, Architecture, Code Quality, Creativity
 - **Stress lens:** Pragmatism, Defensiveness, Performance, Type Rigor
 - **Day 2 lens:** Test Value, Reproducibility, Git Hygiene, Onboarding
@@ -219,15 +220,17 @@ Evaluation complete: docs/plans/YYYY-MM-DD-eval-slug/eval.md
 Scores: [N]/12 pillars at target (≥9)
 Lowest: [pillar] at [X]/10
 
-To remediate and bring all pillars to 9/10, run:
-/pipeline YYYY-MM-DD-eval-slug
+To remediate the pillars below target, run:
+/forge:run YYYY-MM-DD-eval-slug
+
+(Standalone install: /run YYYY-MM-DD-eval-slug. To orchestrate in this session instead: /forge:pipeline YYYY-MM-DD-eval-slug.)
 ```
 
 ## Rules
 
 - **DO NOT** skip the scoping questions
 - **DO NOT** run evaluators sequentially — they MUST run in parallel
-- **DO NOT** re-run evaluator agents after writing eval.md — they run exactly once here. Re-evaluation happens in `/pipeline` after all remediation is complete.
+- **DO NOT** re-run evaluator agents after writing eval.md — they run exactly once here. Re-evaluation happens in the pipeline's verification stage.
 - **DO NOT** start remediation — your only output is the eval doc
 - **DO** include full evaluator outputs in eval.md (the planner needs the detail)
 - **DO** consolidate overlapping findings across evaluators

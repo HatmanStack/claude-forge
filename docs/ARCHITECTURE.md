@@ -20,6 +20,8 @@ The key insight: **each agent runs in its own context window**. The Plan Reviewe
 
 Every role is a **native Claude Code subagent**, defined as a Markdown file in the plugin's `agents/` directory (auto-discovered and scoped as `forge:<name>`). The file body is the role's system prompt; its YAML frontmatter declares the tools and model it may use. The orchestrator spawns a role by its `subagent_type` and passes only the per-invocation task — it never reads a role file or injects a `<role_prompt>` block. This is what makes the team a *pure* Claude Code team rather than ad-hoc prompts handed to a generic agent.
 
+Every role pins its `model`, so the team never silently inherits whatever model the session runs on. Discriminators (the four reviewers, the plan reviewer, the final reviewer) and the Planner run on `opus`: a gate must be at least as strong as the work it judges, and the plan is the highest-leverage artifact. Code generators and the read-only assessors run on `sonnet`; the parallel assessor fan-out is where cost multiplies. Tier A enforces the policy (`test_model_pinned_per_role_class`).
+
 Tool access is gated per role in frontmatter, which turns the pipeline's safety conventions into structural guarantees:
 
 | Role class | Tools | Why |
@@ -28,11 +30,29 @@ Tool access is gated per role in frontmatter, which turns the pipeline's safety 
 | Discriminators (Plan/Code/Final/Health/Doc Reviewers) | `Read, Glob, Grep, Bash, Edit` | Read-only over source; `Edit` is for `feedback.md` only |
 | Assessors (Eval lenses, Health/Doc Auditors) | `Read, Glob, Grep, Bash` | Strictly read-only — the orchestrator writes the intake docs |
 
-No role is granted the `Agent` tool, which enforces the no-nesting constraint. Team coordination tools (`SendMessage` and task tools) are always available to a spawned teammate regardless of its `tools` list, so a read-only reviewer can still be messaged for the next iteration and still reply with its signal.
+No role is granted the `Agent` tool, so no role can spawn agents of its own: all routing stays with the orchestrator. Team coordination tools (`SendMessage` and task tools) are always available to a spawned teammate regardless of its `tools` list, so a read-only reviewer can still be messaged for the next iteration and still reply with its signal.
+
+## Two Runners
+
+The same stages, roles, and plan files run under two orchestrators. They differ in who holds the plan.
+
+| | `/forge:run` (workflow) | `/forge:pipeline` (skill) |
+|---|---|---|
+| Orchestrator | `workflows/run.js`, executed by the workflow runtime | The main session, following `skills/pipeline/` prose |
+| Loop limits, routing, resume | Code | The model re-decides each turn |
+| Role reports | `StructuredOutput`: a typed object; the verdict is a `signal` field | `SendMessage(to="main")`: text ending in the signal |
+| Iterations | A fresh agent per iteration, re-reading the plan files | The same agent, continued with `SendMessage` |
+| Your session | Free; the run is in the background (`/workflows`) | Occupied; every result passes through its context |
+| Decisions | Ends with a verdict (`GO`, `NO-GO`, `VERIFIED`, `UNVERIFIED`, `MAX_ITERATIONS`) | Stops and asks at NO-GO or unverified findings |
+| Requires | Dynamic workflows | `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` |
+
+Moving the orchestration into code removes a class of failures rather than guarding against them. A skill orchestrator can misread a signal, skip a gate, or lose count of iterations. In the workflow, the verdict is a schema field the script branches on, and a gate that didn't run can't produce one. The cost is continuity: a workflow agent is one-shot, so a reviewer re-reads Phase-0 and the phase spec every iteration instead of remembering them. Pipeline state already lives in files, so that costs tokens, not correctness.
+
+Before planning, `/forge:run` spends one cheap read-only agent reporting the plan's state (which the script cannot read itself). It writes nothing under `.claude/`: Claude Code protects that directory, and a background agent can't ask for permission. The run's durable record is the plan directory (the `## Gate Log` in `feedback.md`) and the verdict it returns. Every role agent is spawned with the model its frontmatter pins; a Tier A contract keeps the script's pins equal to the frontmatter, and a Tier C suite runs the script against scripted replies to check gate order, loop limits, resume entry points, and phase routing.
 
 ## Signal Protocol
 
-Agents communicate through structured signals routed by the orchestrator:
+Agents communicate through signals routed by the orchestrator. Under `/forge:run` a signal is the `signal` field of the role's typed report; under `/forge:pipeline` it is the final line of the role's `SendMessage` report.
 
 | Signal | From | To | Meaning |
 |--------|------|----|---------|
@@ -44,6 +64,7 @@ Agents communicate through structured signals routed by the orchestrator:
 | `PHASE_APPROVED` | Reviewer | Next phase / Final | Phase is solid |
 | `GO` | Final Reviewer | Done | Production ready |
 | `NO-GO` | Final Reviewer | Planner / Implementer | Categorized rework |
+| `VERIFIED` / `UNVERIFIED` | Verification reviewer | Done / you (or re-plan) | Audit findings fixed, or which are not |
 
 Non-feature pipelines use additional signals:
 - `EVAL_HIRE_COMPLETE`, `EVAL_STRESS_COMPLETE`, `EVAL_DAY2_COMPLETE` — repo-eval evaluators
@@ -106,7 +127,7 @@ Three evaluator lenses run in parallel, simulating a hiring panel:
 
 After evaluation, a **Calibration** step normalizes scores across lenses (divergences ≥3 points on overlapping concerns are flagged as signal). Users can set per-pillar thresholds or exclude pillars via `pillar_overrides`.
 
-Re-evaluation is **targeted** — only evaluators with pillars below threshold re-run.
+The evaluators run once, at intake. After remediation, a verification reviewer checks the eval's remediation targets; the evaluators do not re-run.
 
 ### Repo-Health Flow
 
@@ -140,11 +161,11 @@ Every reviewer checks against Phase-0. This prevents drift across phases (e.g., 
 
 ## Token Budget
 
-Phases target ~50k tokens for large features (fits in one agent context window). For smaller scopes (remediation, cleanup), phases can be much smaller — the planner sizes to the work, not the budget. Hard ceiling: 75k tokens per phase to avoid context pressure.
+Phases target `CLAUDE_FORGE_PHASE_TARGET_TOKENS` (default 150k) for large features. For smaller scopes (remediation, cleanup), phases can be much smaller: the planner sizes to the work, not the budget. The Plan Reviewer flags any phase above `CLAUDE_FORGE_PHASE_MAX_TOKENS` (default 250k) as a context-pressure risk.
 
 ## Combined Audits
 
-The `/audit` skill runs multiple audits and produces all intake docs in a single directory. Auditor agents (up to 5) run in parallel since they're read-only. A single `/pipeline` command then detects the multiple intake docs and creates ONE unified plan with phases tagged by implementer type.
+The `/forge:audit` skill runs multiple audits and produces all intake docs in a single directory. Auditor agents (up to 5) run in parallel since they're read-only. One pipeline run then detects the multiple intake docs and creates ONE unified plan with phases tagged by implementer type.
 
 This is a merged-plan model, not sequential independent flows. The planner reads all audit findings together and creates phases ordered by work type:
 
@@ -153,7 +174,7 @@ This is a merged-plan model, not sequential independent flows. The planner reads
 3. `[FORTIFIER]` phases next — lock in the clean state with guardrails
 4. `[DOC-ENGINEER]` phases last — docs reflect the final code state
 
-Each phase tag routes to the correct implementer/reviewer pair. A single verification agent verifys the original findings at the end.
+Each phase tag routes to the correct implementer/reviewer pair. A single verification agent checks the original findings at the end; if three or more remain unverified, the run re-plans them once (at most two verification cycles) before reporting.
 
 ## Exit Gates
 
@@ -162,31 +183,30 @@ Each pipeline type has a different completion criteria:
 | Pipeline | Exit Gate | Rationale |
 |----------|-----------|-----------|
 | Feature | Final Reviewer GO/NO-GO | Holistic integration review (only flow with Final Reviewer) |
-| Repo-Eval | Verification verify of remediation targets | One reviewer agent checks specific file:line findings |
+| Repo-Eval | Verification of remediation targets | One reviewer agent checks specific file:line findings |
 | Repo-Health | Verification of CRITICAL/HIGH findings | One reviewer agent checks specific file:line findings; MEDIUM/LOW acceptable to carry |
 | Doc-Health | Verification of DRIFT/STALE/BROKEN findings | One reviewer agent checks specific doc:code pairs |
 
-Evaluator and auditor agents run exactly once (during intake). The verification stage uses the existing code reviewer with a targeted prompt — one agent verifying specific findings instead of 3-5 agents re-scanning the entire codebase. Max 2 verification cycles before surfacing to user.
+Evaluator and auditor agents run exactly once (during intake). The verification stage uses the existing code reviewer with a targeted prompt — one agent verifying specific findings instead of 3-5 agents re-scanning the entire codebase. The verifier logs `VERIFIED` or `UNVERIFIED` in the `## Gate Log` of `feedback.md` and lists unverified findings under `## Verification`.
 
 ## State Recovery
 
-All pipeline types support resumption. When `/pipeline` is re-invoked with the same slug, the orchestrator:
+Both runners resume from the plan directory. Re-running with the same plan id:
 
-1. Reads `feedback.md` for progress signals (`PLAN_APPROVED`, `PHASE_APPROVED`, etc.)
-2. Checks git log for implementation commits per phase
-3. Determines the correct re-entry point (which stage, which phase, which iteration)
-4. Reports detected state to the user before continuing
+1. Reads which plan files exist, and `feedback.md` for open review items and recorded approvals
+2. Checks `git log` for implementation commits per phase
+3. Picks the re-entry point: planning, plan review, a phase's implementer (open feedback), a phase's reviewer (implemented or fixed, not yet approved), or the final gate
+4. Reports the detected state before continuing
 
-A phase is only skip-eligible when `feedback.md` contains a `PHASE_APPROVED` record. Implementation commits alone are not sufficient.
+Every gate decision is one line in an ordered `## Gate Log` in `feedback.md` (`PLAN_APPROVED`, `PHASE_APPROVED — Phase N`, `GO`/`NO-GO`, `VERIFIED`/`UNVERIFIED`), and a rework starts by logging `REWORK`. Resume reads the log in order: a verdict followed by `REWORK` is no longer current, and a reworked plan counts as approved only once a `PLAN_APPROVED` follows the `REWORK`. A phase is skipped only when its approval is logged; implementation commits alone are not enough. Within a session, a stopped `/forge:run` can also be relaunched from `/workflows`, which replays completed agents from cache.
 
 ## NO-GO Rollback
 
-When the feature pipeline's final reviewer issues NO-GO, feedback is categorized:
-- **Plan-level issues** → re-enter at Planner with revision instructions
-- **Implementation-level issues** → re-enter at affected phase Implementer
-- **Mixed** → plan-level first, then implementation
+When the feature pipeline's final reviewer issues NO-GO, it records the issues as `FINAL_REVIEW` feedback, categorized as plan-level (architecture flaw, missing phase) or implementation-level (bug, missing test, security), and logs `NO-GO`.
 
-The `NO-GO` status in feedback.md is updated to `REWORK_IN_PROGRESS` to distinguish active rework from a fresh run.
+Rework adds phases; it never reopens one. It starts by logging `REWORK`. The Planner fixes plan-level issues in the existing phase files and adds new phases for implementation-level fixes; the Plan Reviewer approves the revised plan; only the new phases are implemented and reviewed, then the final gate runs again. Phases approved before the rework stay approved, so the Gate Log stays append-only: no approval ever has to be withdrawn, and an interrupted rework resumes from the log like any other run.
+
+Neither runner retries on its own. `/forge:pipeline` starts the rework when you re-run it after a NO-GO; `/forge:run` stops at a recorded NO-GO (or UNVERIFIED) until you run `/forge:run <plan-id> rework`.
 
 ## Plan Versioning
 
@@ -214,13 +234,13 @@ Each entry varies by skill type:
 {"skill": "pipeline", "date": "2026-03-15", "plan": "2026-03-15-eval-slug", "type": "repo-eval", "verdict": "VERIFIED"}
 ```
 
-The `pipeline` entry includes the detected pipeline type and final verdict. The `audit` entry records which audit types were selected. If the file is malformed, the skill overwrites it with a fresh array containing only the new entry.
+The `pipeline` entry includes the detected pipeline type and final verdict. `/forge:run` does not write this file (see *Two Runners*); its record is the plan directory. The `audit` entry records which audit types were selected. If the file is malformed, the skill overwrites it with a fresh array containing only the new entry.
 
 This log survives OS wipes (it lives in the repo, not a local config directory) and lets users track skill usage across projects over time.
 
 ## Safety Rails
 
-- Max 3 iterations per adversarial loop before escalating to the user
+- Max 3 iterations per adversarial loop; a loop that doesn't converge stops the run (`MAX_ITERATIONS`) with its open items in `feedback.md`
 - NO-GO stops the pipeline — no automatic retry
 - Reviewers cannot modify source code — only feedback.md (enforced by each reviewer subagent's frontmatter `tools`)
 - Plan documents are immutable once created (only Planner revises)
@@ -232,7 +252,7 @@ This log survives OS wipes (it lives in the repo, not a local config directory) 
 
 A multi-agent pipeline has no perimeter — the attack surface is internal. Untrusted data (a comment in the codebase under review, an intake doc, a tool result) flows between agents, and a single injection can fan out. The classic failure mode is silent: the swarm does exactly what it was built to do, nothing errors, and the trace looks ordinary.
 
-Forge models this as five **defense points**, the places where an adversary acts, and turns the tracing hook into a passive monitor for each. The hook's leverage is that it reads every subagent's **role and actions from Claude Code's own transcript metadata** — which attacker-controlled text cannot forge — so it can attest provenance and re-derive consensus *out of band*, exactly the guarantees the in-band channel (DP3) and the model-aggregator (DP5) can't give themselves.
+Forge models this as five **defense points**, the places where an adversary acts, and turns the tracing hook into a passive monitor for each. The hook's leverage is that it reads every subagent's **role from the `agent_type` Claude Code stamps on its hook events and its actions from its own transcript** — which attacker-controlled text cannot forge — so it can attest provenance and re-derive consensus *out of band*, exactly the guarantees the in-band channel (DP3) and the model-aggregator (DP5) can't give themselves.
 
 | DP | Forge surface | Detection (span) | Enforcement already in place |
 |----|---------------|------------------|------------------------------|
@@ -246,19 +266,22 @@ Findings are emitted as red (`StatusCode.ERROR`) spans and summarized on `sessio
 
 ## Prerequisites
 
-Claude Forge's orchestrator uses the `Agent` tool to spawn the native subagents in `agents/` (by `subagent_type`) and `SendMessage` to continue conversations with existing agents across review iterations. These tools are gated behind an experimental feature flag:
+`/forge:run` needs [dynamic workflows](https://code.claude.com/docs/en/workflows), available on paid plans (on Pro, turn on *Dynamic workflows* in `/config`).
+
+The skills (`brainstorm`, the audit skills, and `pipeline`) use the `Agent` tool to spawn the native subagents in `agents/` and `SendMessage` to continue them across review iterations. Those tools are gated behind an experimental flag:
 
 ```bash
 export CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1
 ```
 
-This must be set in the environment before launching Claude Code. Without it, agent spawning and message routing will fail, breaking all pipeline flows. The subagent *definitions* are always available (they are auto-discovered from `agents/`), but spawning them as a team and iterating via `SendMessage` requires the flag.
+Set it in the environment before launching Claude Code. Without it, the skills' agent spawning and message routing fail. The subagent *definitions* are always available (they are auto-discovered from `agents/`).
 
 ## Trade-offs
 
 - **Token cost:** Multiple agents reviewing each other's work can triple total token usage
 - **Time:** A feature that takes one agent 10 minutes may take the pipeline 30-45 minutes with review loops
-- **Orchestrator context:** Long pipelines with many phases accumulate agent result summaries
-- **No nesting:** Claude Code agents can't spawn sub-agents; the orchestrator manages all routing
+- **Orchestrator context:** Under `/forge:pipeline`, long runs accumulate agent reports in the session's context; `/forge:run` keeps them in script variables
+- **Re-reading:** Under `/forge:run`, each iteration's agent starts fresh and re-reads the plan files
+- **No nesting:** No role gets the `Agent` tool, so all routing stays with the orchestrator
 
 Worth it for features where correctness matters: auth, payments, data integrity, infrastructure. For a quick script, single-pass is fine.

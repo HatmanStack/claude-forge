@@ -1,12 +1,13 @@
 ---
 name: pipeline
-description: Run the adversarial plan-implement-review pipeline. Spawns agents for each role with their own context windows. Use after /brainstorm, /repo-eval, /repo-health, or /doc-health has produced a starting doc.
+description: Run the adversarial plan → implement → review pipeline on a plan directory produced by /brainstorm or an audit skill.
+disable-model-invocation: true
 allowed-tools: Agent, SendMessage, Read, Write, Glob, Grep, Bash, Edit
 ---
 
 # Pipeline Orchestrator
 
-You coordinate the adversarial development pipeline. Each role is a **native Claude Code subagent** (defined in the plugin's `agents/` directory) and runs in its own fresh context window. Your job is to spawn each role by its `subagent_type`, read its signals, and route work accordingly. You never read role-prompt files or inject prompt text — the subagent definition supplies the system prompt; you supply only the task.
+You coordinate the adversarial development pipeline turn by turn in this session. (The `/forge:run` workflow runs the same stages from a script; this skill is for when workflows are unavailable or the user wants to steer between stages.) Each role is a **native Claude Code subagent** (defined in the plugin's `agents/` directory) and runs in its own fresh context window. Your job is to spawn each role by its `subagent_type`, read its signals, and route work accordingly. You never read role-prompt files or inject prompt text — the subagent definition supplies the system prompt; you supply only the task.
 
 **Read `pipeline-protocol.md` for the full signal protocol before starting.**
 
@@ -48,12 +49,15 @@ Each pipeline type uses a distinct intake filename — no frontmatter parsing ne
 
 Before starting any stage, detect prior progress to determine the correct entry point:
 
-1. **Check for plan approval**: Read `docs/plans/$ARGUMENTS/feedback.md` (if it exists) for a `PLAN_APPROVED` signal or resolved `PLAN_REVIEW` entries with no remaining OPEN `PLAN_REVIEW` items
-2. **Check for phase progress**: Look for `PHASE_APPROVED`, OPEN/resolved `CODE_REVIEW` entries, and implementation commits (see Stage 2 State Recovery)
-3. **Check for final review**: Look for `GO` or `NO-GO` entries tagged `FINAL_REVIEW`
+Gates log each decision as one line under `## Gate Log` in `docs/plans/$ARGUMENTS/feedback.md`, oldest first; a rework starts with a `REWORK` line.
+
+1. **Check for plan approval**: the log has a `PLAN_APPROVED` line after its last `REWORK` line (or has no `REWORK` line), and no `PLAN_REVIEW` item is OPEN
+2. **Check for phase progress**: `PHASE_APPROVED — Phase N` lines in the log, OPEN/resolved `CODE_REVIEW` entries, and implementation commits (see Stage 2 State Recovery)
+3. **Check for final review**: the last `GO` or `NO-GO` line in the log, unless a `REWORK` line follows it
 
 Based on findings:
-- `GO` or `NO-GO` in feedback.md → pipeline already completed, report result to user and stop
+- `GO` logged → pipeline already completed, report the result to the user and stop
+- `NO-GO` logged (no `REWORK` after it) → report it and follow the NO-GO Re-Entry Path below
 - `PHASE_APPROVED` for all phases → skip to Stage 3 (Final Review)
 - Any phase progress exists + `PLAN_APPROVED` → skip to Stage 2 at the correct phase (see State Recovery below)
 - Plan files exist + OPEN `PLAN_REVIEW` feedback → enter Stage 1 at revision step (1a with revision instructions)
@@ -83,12 +87,12 @@ Read the brainstorm document, explore the codebase, and create the implementatio
 
 Remember to create feedback.md with the empty template structure.
 
-When complete, end your response with: PLAN_COMPLETE
+When complete, report with: PLAN_COMPLETE
 </task>
 ```
 
-- Wait for the agent to complete
-- Verify `PLAN_COMPLETE` is in the result
+- Wait for the planner's `SendMessage` report — the `Agent` call returns at spawn and never carries it (see `pipeline-protocol.md` → *Signals Arrive by Message, Not by Return Value*)
+- Verify `PLAN_COMPLETE` is the report's final line
 
 ### 1b: Spawn Plan Reviewer (once)
 
@@ -117,7 +121,7 @@ The Plan Reviewer has requested revisions. Read docs/plans/$ARGUMENTS/feedback.m
 
 Address each item by revising the plan files. Move resolved feedback to the "Resolved Feedback" section with a resolution note.
 
-When complete, end your response with: PLAN_COMPLETE
+When complete, report with: PLAN_COMPLETE
 ```
 
 - After the planner responds, use **SendMessage** with `to="plan-reviewer"`:
@@ -155,14 +159,14 @@ Identify all phases by using **Glob** for `docs/plans/$ARGUMENTS/Phase-*.md` (ex
 Before processing phases, determine each phase's completion state. For each Phase-N:
 
 1. **Read** `docs/plans/$ARGUMENTS/feedback.md` and check for:
-   - A `PHASE_APPROVED` entry for Phase N → phase is **done**, skip it
+   - A `PHASE_APPROVED — Phase N` line in the Gate Log → phase is **done**, skip it
    - OPEN `CODE_REVIEW` items for Phase N → phase needs **review fixes**, enter at step 2a (Implementer) with revision instructions
    - Resolved `CODE_REVIEW` items for Phase N but no `PHASE_APPROVED` → phase needs **re-review**, enter at step 2b (Reviewer)
 2. **Check** `git log --oneline` for commits referencing Phase N (e.g., `phase-N`, `Phase N`, `phase N`)
    - Commits exist but no feedback.md review entries → phase was **implemented but never reviewed**, enter at step 2b (Reviewer)
    - No commits and no feedback entries → phase is **not started**, enter at step 2a (Implementer)
 
-A phase is only skip-eligible when feedback.md contains a `PHASE_APPROVED` record for it. Implementation commits alone are not sufficient.
+A phase is only skip-eligible when the Gate Log has a `PHASE_APPROVED — Phase N` line for it. Implementation commits alone are not sufficient.
 
 Report the recovered state to the user before continuing:
 ```text
@@ -193,7 +197,7 @@ Read these files in order:
 
 Implement all tasks in Phase-N following TDD. Make atomic commits.
 
-When complete, end your response with: IMPLEMENTATION_COMPLETE
+When complete, report with: IMPLEMENTATION_COMPLETE
 </task>
 ```
 
@@ -229,7 +233,7 @@ The Code Reviewer has requested changes. Read docs/plans/$ARGUMENTS/feedback.md 
 
 Address each item. Move resolved feedback to "Resolved Feedback" with a resolution note. Continue following TDD.
 
-When complete, end your response with: IMPLEMENTATION_COMPLETE
+When complete, report with: IMPLEMENTATION_COMPLETE
 ```
 
 - After the implementer responds, use **SendMessage** with `to="reviewer-phase-N"`:
@@ -334,12 +338,12 @@ B) Review feedback manually: read docs/plans/$ARGUMENTS/feedback.md
 C) Ship with caveats (if issues are minor)
 ```
 
-**NO-GO Re-Entry Path:** When the user re-runs `/pipeline $ARGUMENTS` after a NO-GO, the State Recovery (Stage 0) detects the `NO-GO` in feedback.md and routes rework based on the final reviewer's categorization:
-- **Plan-level issues** (architecture flaw, missing phase): Re-enter at Stage 1 (Planner) with revision instructions referencing the `FINAL_REVIEW` feedback
-- **Implementation-level issues** (bug, missing test, security): Re-enter at Stage 2 at the affected phase(s), spawning the Implementer with `FINAL_REVIEW` feedback items as `CODE_REVIEW` rework
-- **Mixed issues**: Plan-level first, then implementation-level
+**NO-GO Re-Entry Path:** When the user re-runs `/pipeline $ARGUMENTS` after a NO-GO, State Recovery (Stage 0) finds the `NO-GO` in the Gate Log. Rework adds phases; it never reopens an approved one:
 
-The orchestrator should update the `NO-GO` status in feedback.md to `REWORK_IN_PROGRESS` to distinguish active rework from a fresh pipeline run.
+1. Append `REWORK` under `## Gate Log` before anything else, so an interrupted run resumes the rework instead of reporting the old NO-GO.
+2. Re-enter Stage 1: the Planner reads the `FINAL_REVIEW` items, fixes **plan-level** issues (architecture flaw, missing phase) in the existing phase files, and adds new Phase-N files, numbered after the last one, for **implementation-level** issues (bug, missing test, security). It moves each `FINAL_REVIEW` item to Resolved Feedback, naming the phase that addresses it.
+3. The Plan Reviewer reviews the revised plan; its `PLAN_APPROVED` after the `REWORK` line approves it.
+4. Stage 2 runs only the new phases; phases approved before the rework stay approved. Then Stage 3 as usual.
 
 ### On Max Iterations Reached
 
@@ -359,12 +363,11 @@ B) Manually resolve and continue
 
 ### Agent Spawning
 
-- **ONE agent at a time.** Every stage runs a single foreground agent. Wait for it to complete fully before deciding the next step.
+- **ONE agent at a time.** Every stage runs a single agent. Wait for its `SendMessage` report before deciding the next step.
 - **ONE Implementer and ONE Reviewer per phase.** Spawn each once with the role's `subagent_type` and canonical `name` from `pipeline-protocol.md`, then use `SendMessage(to="<name>")` for subsequent iterations. Never spawn a new agent for the same role within a phase. Never address by role description — use the exact `name` you spawned with.
 - **NO duplicate or replacement agents.** If an agent is slow, wait. Agents can take 20+ minutes on large codebases. Do NOT spawn a second agent for the same work.
 - **NO per-phase planners.** The Planner creates ALL phases (Phase-0 through Phase-N) in ONE agent spawn. Never decompose planning into separate agents per phase.
 - **NO parallel agents.** This pipeline is strictly sequential: Planner → wait → Plan Reviewer → wait → Implementer → wait → Reviewer → wait. Never overlap stages.
-- **NO background agents.** Every agent spawn must be foreground. Wait for the result before proceeding.
 
 ### Pipeline Integrity
 

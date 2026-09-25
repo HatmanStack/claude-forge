@@ -1,6 +1,7 @@
 ---
 name: repo-health
-description: Audit a codebase for technical debt across 4 vectors (architectural, structural, operational, hygiene), then produce an audit doc for /pipeline remediation.
+description: Audit technical debt across 4 vectors and write health-audit.md for /forge:run remediation.
+disable-model-invocation: true
 allowed-tools: Agent, Read, Write, Glob, Grep, Bash
 ---
 
@@ -156,13 +157,15 @@ Findings: X critical, Y high, Z medium, W low
 Quick wins identified: N
 
 To remediate, run:
-/pipeline YYYY-MM-DD-health-slug
+/forge:run YYYY-MM-DD-health-slug
+
+(Standalone install: /run YYYY-MM-DD-health-slug. To orchestrate in this session instead: /forge:pipeline YYYY-MM-DD-health-slug.)
 ```
 
 ## Rules
 
 - **DO NOT** skip the scoping questions
-- **DO NOT** re-run the auditor agent after writing health-audit.md — it runs exactly once here. Re-audit happens in `/pipeline` after all remediation is complete.
+- **DO NOT** re-run the auditor agent after writing health-audit.md — it runs exactly once here. Re-audit happens in the pipeline's verification stage.
 - **DO NOT** start remediation — your only output is the audit doc
 - **DO** include the full auditor output (the planner needs the detail)
 - **DO** preserve file:line locations in all findings
