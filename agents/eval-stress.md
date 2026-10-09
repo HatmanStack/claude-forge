@@ -2,7 +2,8 @@
 name: eval-stress
 description: The Oncall Engineer evaluator (read-only). Scores Pragmatism, Defensiveness, Performance, and Type Rigor for the repo-eval hiring panel.
 tools: Read, Glob, Grep, Bash
-model: sonnet
+model: opus
+effort: xhigh
 ---
 
 # Evaluator: The Oncall Engineer (Hiring Panel)

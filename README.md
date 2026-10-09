@@ -146,21 +146,21 @@ claude-forge/
 │   ├── plugin.json                 # Plugin manifest
 │   └── marketplace.json
 ├── agents/                         # Native subagents (the "team"), discovered as forge:<name>
-│   ├── planner.md                  # Generator (opus)
-│   ├── plan-reviewer.md            # Discriminator (opus)
-│   ├── implementer.md              # Generator (sonnet), feature + repo-eval flows
-│   ├── reviewer.md                 # Discriminator (opus), code review + verification
-│   ├── final-reviewer.md           # Discriminator (opus), feature flow only
-│   ├── eval-hire.md                # The Pragmatist (sonnet, read-only)
-│   ├── eval-stress.md              # The Oncall Engineer (sonnet, read-only)
-│   ├── eval-day2.md                # The Team Lead (sonnet, read-only)
-│   ├── health-auditor.md           # Tech-debt assessment (sonnet, read-only)
-│   ├── health-hygienist.md         # Generator (sonnet), subtractive
-│   ├── health-fortifier.md         # Generator (sonnet), additive guardrails
-│   ├── health-reviewer.md          # Discriminator (opus), hygienist + fortifier
-│   ├── doc-auditor.md              # 6-phase drift detection (sonnet, read-only)
-│   ├── doc-engineer.md             # Generator (sonnet), doc fixes + prevention
-│   └── doc-reviewer.md             # Discriminator (opus)
+│   ├── planner.md                  # Generator
+│   ├── plan-reviewer.md            # Discriminator
+│   ├── implementer.md              # Generator, feature + repo-eval flows
+│   ├── reviewer.md                 # Discriminator, code review + verification
+│   ├── final-reviewer.md           # Discriminator, feature flow only
+│   ├── eval-hire.md                # The Pragmatist (read-only)
+│   ├── eval-stress.md              # The Oncall Engineer (read-only)
+│   ├── eval-day2.md                # The Team Lead (read-only)
+│   ├── health-auditor.md           # Tech-debt assessment (read-only)
+│   ├── health-hygienist.md         # Generator, subtractive
+│   ├── health-fortifier.md         # Generator, additive guardrails
+│   ├── health-reviewer.md          # Discriminator, hygienist + fortifier
+│   ├── doc-auditor.md              # 6-phase drift detection (read-only)
+│   ├── doc-engineer.md             # Generator, doc fixes + prevention
+│   └── doc-reviewer.md             # Discriminator
 ├── workflows/
 │   └── run.js                      # /forge:run: the pipeline as a Workflow script
 ├── skills/
@@ -184,7 +184,7 @@ claude-forge/
 └── CHANGELOG.md
 ```
 
-Each role is a **native Claude Code subagent**: its prompt is the file body; its tools and model are pinned in YAML frontmatter. Generators get write access (`Read, Write, Edit, Glob, Grep, Bash`); reviewers are restricted to `feedback.md` edits (`Read, Glob, Grep, Bash, Edit`); evaluators and auditors are read-only (`Read, Glob, Grep, Bash`); no role can spawn agents. Both runners spawn roles by type (`forge:planner`) and pass only the task; no role-prompt text is injected.
+Each role is a **native Claude Code subagent**: its prompt is the file body; its tools, model (`opus`) and effort (`xhigh`) are pinned in YAML frontmatter. Generators get write access (`Read, Write, Edit, Glob, Grep, Bash`); reviewers are restricted to `feedback.md` edits (`Read, Glob, Grep, Bash, Edit`); evaluators and auditors are read-only (`Read, Glob, Grep, Bash`); no role can spawn agents. Both runners spawn roles by type (`forge:planner`) and pass only the task; no role-prompt text is injected.
 
 ## Evaluation
 

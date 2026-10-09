@@ -29,7 +29,7 @@ async function run({ state = {}, replies = {}, args = '2026-01-01-demo' } = {}) 
   const queues = Object.fromEntries(Object.entries(replies).map(([k, v]) => [k, [...v]]))
   const agent = async (prompt, opts = {}) => {
     const name = (opts.agentType || opts.label || '').replace(/^forge:/, '')
-    calls.push({ name, model: opts.model, agentType: opts.agentType, label: opts.label, prompt })
+    calls.push({ name, model: opts.model, effort: opts.effort, agentType: opts.agentType, label: opts.label, prompt })
     if (opts.label === 'recover-state') return { ...STATE, ...state }
     if (opts.label === 'calibrate-eval') return 'calibrated'
     const q = queues[name]
@@ -74,10 +74,11 @@ test('every agent pins a non-Fable model and forge roles use the plugin prefix',
     assert.ok(['opus', 'sonnet', 'haiku'].includes(c.model), `${c.label} model=${c.model}`)
     if (c.agentType) assert.match(c.agentType, /^forge:/)
   }
-  const model = Object.fromEntries(calls.filter(c => c.agentType).map(c => [c.name, c.model]))
-  assert.deepEqual(model, {
-    planner: 'opus', 'plan-reviewer': 'opus', implementer: 'sonnet', reviewer: 'opus', 'final-reviewer': 'opus',
-  })
+  // Every role runs on opus at xhigh; only the read-only state reader is lighter.
+  for (const c of calls.filter(c => c.agentType)) {
+    assert.equal(c.model, 'opus', `${c.label} model`)
+    assert.equal(c.effort, 'xhigh', `${c.label} effort`)
+  }
 })
 
 test('plan not approved after 3 rounds stops before implementation', async () => {

@@ -20,7 +20,7 @@ The key insight: **each agent runs in its own context window**. The Plan Reviewe
 
 Every role is a **native Claude Code subagent**, defined as a Markdown file in the plugin's `agents/` directory (auto-discovered and scoped as `forge:<name>`). The file body is the role's system prompt; its YAML frontmatter declares the tools and model it may use. The orchestrator spawns a role by its `subagent_type` and passes only the per-invocation task — it never reads a role file or injects a `<role_prompt>` block. This is what makes the team a *pure* Claude Code team rather than ad-hoc prompts handed to a generic agent.
 
-Every role pins its `model`, so the team never silently inherits whatever model the session runs on. Discriminators (the four reviewers, the plan reviewer, the final reviewer) and the Planner run on `opus`: a gate must be at least as strong as the work it judges, and the plan is the highest-leverage artifact. Code generators and the read-only assessors run on `sonnet`; the parallel assessor fan-out is where cost multiplies. Tier A enforces the policy (`test_model_pinned_per_role_class`).
+Every role pins its `model` and `effort`, so the team never silently inherits whatever the session runs on. Every role runs on `opus` at `xhigh` effort: generators, gates, and assessors alike. Tier A enforces the policy (`test_model_and_effort_pinned`).
 
 Tool access is gated per role in frontmatter, which turns the pipeline's safety conventions into structural guarantees:
 
@@ -48,7 +48,7 @@ The same stages, roles, and plan files run under two orchestrators. They differ 
 
 Moving the orchestration into code removes a class of failures rather than guarding against them. A skill orchestrator can misread a signal, skip a gate, or lose count of iterations. In the workflow, the verdict is a schema field the script branches on, and a gate that didn't run can't produce one. The cost is continuity: a workflow agent is one-shot, so a reviewer re-reads Phase-0 and the phase spec every iteration instead of remembering them. Pipeline state already lives in files, so that costs tokens, not correctness.
 
-Before planning, `/forge:run` spends one cheap read-only agent reporting the plan's state (which the script cannot read itself). It writes nothing under `.claude/`: Claude Code protects that directory, and a background agent can't ask for permission. The run's durable record is the plan directory (the `## Gate Log` in `feedback.md`) and the verdict it returns. Every role agent is spawned with the model its frontmatter pins; a Tier A contract keeps the script's pins equal to the frontmatter, and a Tier C suite runs the script against scripted replies to check gate order, loop limits, resume entry points, and phase routing.
+Before planning, `/forge:run` spends one cheap read-only agent reporting the plan's state (which the script cannot read itself). It writes nothing under `.claude/`: Claude Code protects that directory, and a background agent can't ask for permission. The run's durable record is the plan directory (the `## Gate Log` in `feedback.md`) and the verdict it returns. Every role agent is spawned with the model and effort its frontmatter pins (`opus`, `xhigh`); a Tier A contract keeps the script's pins equal to the frontmatter, and a Tier C suite runs the script against scripted replies to check gate order, loop limits, resume entry points, and phase routing.
 
 ## Signal Protocol
 

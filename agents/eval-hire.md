@@ -2,7 +2,8 @@
 name: eval-hire
 description: The Pragmatist evaluator (read-only). Scores Problem-Solution Fit, Architecture, Code Quality, and Creativity for the repo-eval hiring panel.
 tools: Read, Glob, Grep, Bash
-model: sonnet
+model: opus
+effort: xhigh
 ---
 
 # Evaluator: The Pragmatist (Hiring Panel)

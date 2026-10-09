@@ -83,17 +83,14 @@ def test_tool_policy_per_role_class(agent):
         pytest.fail(f"{name} is not classified into a known role class")
 
 
-# Model policy. An unpinned agent inherits the session model, so a session
-# switched to a premium model silently runs the whole team on it.
-# Discriminators judge the generators' work, so they are never weaker than it.
-MODEL_BY_ROLE = {"planner": "opus"}
-MODEL_BY_CLASS = {"reviewer": "opus", "generator": "sonnet", "assessor": "sonnet"}
+# Model policy. An unpinned agent inherits the session model and effort, so a
+# session switched to another model silently runs the whole team on it. Every
+# role runs on opus at xhigh effort.
+MODEL, EFFORT = "opus", "xhigh"
 
 
 @pytest.mark.parametrize("agent", AGENTS, ids=_ids)
-def test_model_pinned_per_role_class(agent):
-    name = agent["name"]
-    expected = MODEL_BY_ROLE.get(name) or MODEL_BY_CLASS[registry.role_class(name)]
-    assert agent["frontmatter"].get("model") == expected, (
-        f"{name} must pin model: {expected} (got {agent['frontmatter'].get('model')!r})"
-    )
+def test_model_and_effort_pinned(agent):
+    fm = agent["frontmatter"]
+    assert fm.get("model") == MODEL, f"{agent['name']} must pin model: {MODEL} (got {fm.get('model')!r})"
+    assert fm.get("effort") == EFFORT, f"{agent['name']} must pin effort: {EFFORT} (got {fm.get('effort')!r})"

@@ -3,6 +3,7 @@ name: reviewer
 description: Code quality gate (discriminator). Verifies a phase implementation against its spec and Phase-0 conventions using tools; writes feedback to feedback.md only.
 tools: Read, Glob, Grep, Bash, Edit
 model: opus
+effort: xhigh
 ---
 
 # Code Reviewer (Senior Engineer)

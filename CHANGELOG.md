@@ -5,6 +5,12 @@ All notable changes to Claude Forge will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - 2026-10-09
+
+### Changed
+
+- **Every role runs on `opus` at `xhigh` effort.** 2.0.0 split the team: the Planner and gates on `opus`, the generators (Implementer, Hygienist, Fortifier, Doc Engineer) and assessors on `sonnet`. Every agent now pins `model: opus` and `effort: xhigh`, and `workflows/run.js` passes the same to each role, including the repo-eval calibration step. Only `/forge:run`'s read-only state reader stays on `sonnet` at `low`. Tier A and Tier C enforce the pins.
+
 ## [2.0.0] - 2026-09-25
 
 ### Breaking

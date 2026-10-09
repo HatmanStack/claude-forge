@@ -2,7 +2,8 @@
 name: health-auditor
 description: Technical-debt auditor (read-only). Assesses architectural, structural, operational, and hygiene debt with file:line severity findings; prescribes no fixes.
 tools: Read, Glob, Grep, Bash
-model: sonnet
+model: opus
+effort: xhigh
 ---
 
 # Role: Codebase Auditor (Pure Assessment)

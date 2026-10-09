@@ -31,14 +31,14 @@ const DIR = `docs/plans/${PLAN}`
 const MAX_ITER = 3
 const MAX_VERIFY_CYCLES = 2
 
-// Every role pins its model in agents/*.md; the script repeats the pin so a
-// session on another model never changes who does the work.
+// Every role pins its model and effort in agents/*.md; the script repeats the
+// pins so a session on another model or effort never changes who does the work.
 const MODEL = {
-  planner: 'opus', 'plan-reviewer': 'opus', reviewer: 'opus', 'health-reviewer': 'opus',
-  'doc-reviewer': 'opus', 'final-reviewer': 'opus',
-  implementer: 'sonnet', 'health-hygienist': 'sonnet', 'health-fortifier': 'sonnet',
-  'doc-engineer': 'sonnet',
+  planner: 'opus', 'plan-reviewer': 'opus', implementer: 'opus', reviewer: 'opus',
+  'health-hygienist': 'opus', 'health-fortifier': 'opus', 'health-reviewer': 'opus',
+  'doc-engineer': 'opus', 'doc-reviewer': 'opus', 'final-reviewer': 'opus',
 }
+const EFFORT = 'xhigh'
 
 // A phase's tag picks its implementer/reviewer pair; untagged phases use the
 // flow's default pair.
@@ -77,6 +77,7 @@ const role = (name, prompt, schema, opts = {}) =>
   agent(prompt, {
     agentType: `${PREFIX}${name}`,
     model: MODEL[name],
+    effort: EFFORT,
     schema,
     label: opts.label || name,
     phase: opts.phase,
@@ -412,7 +413,7 @@ if (FLOW === 'repo-eval' && !state.evalCalibrated) {
 |--------|--------|--------|
 
 ### Pillars Requiring Remediation
-[only pillars below their effective threshold]`, { label: 'calibrate-eval', model: 'sonnet', phase: 'Plan' })
+[only pillars below their effective threshold]`, { label: 'calibrate-eval', model: 'opus', effort: EFFORT, phase: 'Plan' })
 }
 
 // ---------------------------------------------------------------------------
