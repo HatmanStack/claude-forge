@@ -43,7 +43,7 @@ automatically. Freezes the invariants from the native-subagent migration:
 - **tool policy per role class**: generators get `Write`+`Edit`; reviewers get `Edit` but not `Write` (read-only over source); assessors are fully read-only; **no role gets `Agent`** (no nesting); tools stay within the allowed vocabulary
 - every `forge:<type>` referenced under `skills/` resolves to an agent file, and every agent is referenced (no dangling refs, no orphans)
 - `pipeline-protocol.md` lists every role; `plugin.json` declares no `agents` field (auto-discovery preserved); `plugin.json` / `marketplace.json` versions agree; the `CHANGELOG` has the current version
-- **model policy**: every agent pins `model` (opus for the Planner and every gate, sonnet for generators and assessors), and `workflows/run.js` pins the same model per role
+- **model policy**: every agent pins `model: opus` and `effort: xhigh`, and `workflows/run.js` pins the same per role
 - every skill is user-invoked (`disable-model-invocation: true`)
 - the trace hook's role taxonomy and signal-authorization map match the registry (security/eval can't drift from the agents)
 

@@ -84,10 +84,13 @@ def test_workflow_model_pins_match_agent_frontmatter():
     src = (registry.REPO_ROOT / "workflows" / "run.js").read_text()
     block = re.search(r"const MODEL = \{(.*?)\n\}", src, re.S).group(1)
     pins = dict(re.findall(r"'?([a-z-]+)'?: '(opus|sonnet|haiku)'", block))
-    agents = {a["name"]: a["frontmatter"].get("model") for a in registry.load_agents()}
+    loaded = registry.load_agents()
+    agents = {a["name"]: a["frontmatter"].get("model") for a in loaded}
     spawned = {r for r in agents if r not in {"eval-hire", "eval-stress", "eval-day2",
                                               "health-auditor", "doc-auditor"}}
     assert pins == {r: agents[r] for r in spawned}
+    effort = re.search(r"const EFFORT = '([a-z]+)'", src).group(1)
+    assert {a["frontmatter"].get("effort") for a in loaded if a["name"] in spawned} == {effort}
 
 
 def _load_hook():
