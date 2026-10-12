@@ -45,6 +45,10 @@ ADVANCE_EMITTERS = {
 }
 NEG_SIGNALS = {"REVISION_REQUIRED", "CHANGES_REQUESTED", "UNVERIFIED", "NO-GO"}
 COMPLETE_SIGNALS = {"PLAN_COMPLETE", "IMPLEMENTATION_COMPLETE"}
+# Stop signals: the run halts for something outside the pipeline (a human gate,
+# an unmet prerequisite). Only a generator reports one, from a phase it could
+# not build; no reviewer runs on that phase.
+HALT_EMITTERS = {"BLOCKED": GENERATOR_ROLES}
 
 
 def role_class(role):

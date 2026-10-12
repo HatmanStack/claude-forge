@@ -132,3 +132,17 @@ def test_feedback_template_records_no_decisions():
     assert "## Gate Log" in template
     decisions = r"(?m)^(PLAN_APPROVED|PHASE_APPROVED|GO|NO-GO|VERIFIED|UNVERIFIED|REWORK)\b"
     assert not re.search(decisions, template)
+
+
+PHASE_GENERATORS = {"implementer", "health-hygienist", "health-fortifier", "doc-engineer"}
+
+
+def test_blocked_is_a_registered_halt_signal_for_generators():
+    assert registry.HALT_EMITTERS == {"BLOCKED": registry.GENERATOR_ROLES}
+
+
+def test_trace_hook_records_halt_signals():
+    """BLOCKED reaches trace-summary.json, so check_run.py can validate it."""
+    mod = _load_hook()
+    for sig in registry.HALT_EMITTERS:
+        assert sig in mod._NEG_SIGNAL_RES, sig

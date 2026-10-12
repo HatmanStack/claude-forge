@@ -302,3 +302,15 @@ def test_workflow_structured_reports_are_captured(hook, tmp_path):
     # An implementer casting a reviewer's gate signal is a forged ballot.
     assert _by_name(hook.spans(), "security:dp3.signal_forgery")
 
+
+def test_a_blocked_report_reaches_the_trace_summary(hook, tmp_path):
+    hook(hook_event_name="UserPromptSubmit", prompt="/forge:run 2026-01-01-demo")
+    hook(hook_event_name="SubagentStart", agent_id="b1", agent_type="forge:implementer")
+    hook(hook_event_name="PreToolUse", tool_name="StructuredOutput", tool_use_id="so-b",
+         agent_id="b1", agent_type="forge:implementer",
+         tool_input={"signal": "BLOCKED", "blockedOn": "human gate 1", "summary": "nothing built"})
+    hook(hook_event_name="SubagentStop", agent_id="b1", agent_type="forge:implementer",
+         agent_transcript_path="", last_assistant_message="")
+    summary = json.loads((hook.state_dir / "trace-summary.json").read_text())
+    assert {"role": "implementer", "signal": "BLOCKED"} in summary["events"]
+

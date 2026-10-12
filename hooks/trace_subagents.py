@@ -195,8 +195,11 @@ def _signal_re(tok):
 
 
 _ADVANCE_RES = {k: _signal_re(k) for k in _ADVANCE_EMITTERS}
+# Non-advancing signals, recorded so trace-summary.json carries them. BLOCKED
+# is a stop rather than a verdict: a generator reports a phase it could not
+# build because a human gate or prerequisite is unmet.
 _NEG_SIGNAL_RES = {
-    s: _signal_re(s) for s in ("REVISION_REQUIRED", "CHANGES_REQUESTED", "UNVERIFIED", "NO-GO")
+    s: _signal_re(s) for s in ("REVISION_REQUIRED", "CHANGES_REQUESTED", "UNVERIFIED", "NO-GO", "BLOCKED")
 }
 
 # DP1 — instruction-injection phrasing in untrusted input (file content an agent
