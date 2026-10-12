@@ -43,7 +43,7 @@ The same stages, roles, and plan files run under two orchestrators. They differ 
 | Role reports | `StructuredOutput`: a typed object; the verdict is a `signal` field | `SendMessage(to="main")`: text ending in the signal |
 | Iterations | A fresh agent per iteration, re-reading the plan files | The same agent, continued with `SendMessage` |
 | Your session | Free; the run is in the background (`/workflows`) | Occupied; every result passes through its context |
-| Decisions | Ends with a verdict (`GO`, `NO-GO`, `VERIFIED`, `UNVERIFIED`, `MAX_ITERATIONS`) | Stops and asks at NO-GO or unverified findings |
+| Decisions | Ends with a verdict (`GO`, `NO-GO`, `VERIFIED`, `UNVERIFIED`, `BLOCKED`, `NO_PROGRESS`, `MAX_ITERATIONS`) | Stops and asks at NO-GO or unverified findings; stops and reports at a blocked phase or no progress |
 | Requires | Dynamic workflows | `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` |
 
 Moving the orchestration into code removes a class of failures rather than guarding against them. A skill orchestrator can misread a signal, skip a gate, or lose count of iterations. In the workflow, the verdict is a schema field the script branches on, and a gate that didn't run can't produce one. The cost is continuity: a workflow agent is one-shot, so a reviewer re-reads Phase-0 and the phase spec every iteration instead of remembering them. Pipeline state already lives in files, so that costs tokens, not correctness.
@@ -60,6 +60,7 @@ Agents communicate through signals routed by the orchestrator. Under `/forge:run
 | `REVISION_REQUIRED` | Plan Reviewer | Planner | Issues found |
 | `PLAN_APPROVED` | Plan Reviewer | Implementer | Plan is sound |
 | `IMPLEMENTATION_COMPLETE` | Implementer | Reviewer | Phase code ready |
+| `BLOCKED` | Implementer (any phase generator) | Orchestrator stops | A prerequisite or human gate is unmet; nothing built, no review |
 | `CHANGES_REQUESTED` | Reviewer | Implementer | Issues found |
 | `PHASE_APPROVED` | Reviewer | Next phase / Final | Phase is solid |
 | `GO` | Final Reviewer | Done | Production ready |
@@ -241,6 +242,8 @@ This log survives OS wipes (it lives in the repo, not a local config directory) 
 ## Safety Rails
 
 - Max 3 iterations per adversarial loop; a loop that doesn't converge stops the run (`MAX_ITERATIONS`) with its open items in `feedback.md`
+- A phase that waits on a prerequisite or human gate is reported `BLOCKED` by its implementer: nothing is built, no reviewer runs, the run stops with verdict `BLOCKED`, and the next run restarts that phase at its implementer
+- Two `CHANGES_REQUESTED` on the same commit mean the implementer committed nothing in between: the run stops with verdict `NO_PROGRESS` instead of spending its remaining rounds
 - NO-GO stops the pipeline — no automatic retry
 - Reviewers cannot modify source code — only feedback.md (enforced by each reviewer subagent's frontmatter `tools`)
 - Plan documents are immutable once created (only Planner revises)

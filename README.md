@@ -92,6 +92,8 @@ A workflow cannot stop to ask you anything, so `/forge:run` ends with a verdict 
 |---------|---------|------|
 | `GO` / `VERIFIED` | Feature production-ready / audit findings verified | Done |
 | `NO-GO` / `UNVERIFIED` | Recorded in `feedback.md` with the issues | Fix by hand, or `/forge:run <plan-id> rework` to re-plan and continue |
+| `BLOCKED` | A phase waits on a prerequisite or human gate (for example an owner action listed under the plan's `## Human Gates`); nothing was built and no review ran | Meet the gate, then re-run; the phase restarts at its implementer, which re-checks it |
+| `NO_PROGRESS` | The reviewer requested changes twice on the same commit, so the implementer committed nothing in between | Read the open review items for that phase, resolve what is stopping it, then re-run |
 | `MAX_ITERATIONS` | A plan or phase did not converge in 3 rounds | Read the open items in `feedback.md`, guide, then re-run |
 
 **`/forge:pipeline`** orchestrates in your conversation: the main session spawns each role, continues it with `SendMessage` across iterations, and stops to ask you at NO-GO or unverified findings. Use it when workflows are unavailable, or when you want to steer between stages.
