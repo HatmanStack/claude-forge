@@ -125,3 +125,43 @@ def test_each_phase_consumes_one_implementation():
     ]
     kinds = {v["kind"] for v in T.check_no_skipped_review(run)}
     assert "phase_approved_without_impl" in kinds
+
+
+# ---- Blocked phases ---------------------------------------------------------
+# A phase waiting on a human gate signals BLOCKED and the run stops. Reviewing a
+# phase that was never built is the failure seen live: implementer <-> reviewer
+# looping on an unchanged HEAD.
+
+def test_blocked_phase_that_stops_is_legal():
+    run = LEGAL_FEATURE[:3] + [ev("implementer", "BLOCKED")]
+    assert T.validate_trajectory(run) == []
+
+
+def test_blocked_then_resumed_implementation_is_legal():
+    run = LEGAL_FEATURE[:3] + [
+        ev("implementer", "BLOCKED"),
+        ev("implementer", "IMPLEMENTATION_COMPLETE"),  # resumed run, gate met
+        ev("reviewer", "PHASE_APPROVED"),
+    ]
+    assert T.check_blocked_halts(run) == []
+
+
+def test_reviewing_a_blocked_phase_is_caught():
+    run = LEGAL_FEATURE[:3] + [
+        ev("implementer", "BLOCKED"),
+        ev("reviewer", "CHANGES_REQUESTED"),  # reviewed a phase that was never built
+    ]
+    kinds = {v["kind"] for v in T.check_blocked_halts(run)}
+    assert "blocked_phase_reviewed" in kinds
+    assert "blocked_phase_reviewed" in {v["kind"] for v in T.validate_trajectory(run)}
+
+
+def test_only_a_generator_may_report_blocked():
+    run = [ev("reviewer", "BLOCKED")]
+    assert "halt_forgery" in {v["kind"] for v in T.check_blocked_halts(run)}
+
+
+def test_a_planner_may_not_report_blocked():
+    """BLOCKED reports a phase that could not be built; the planner builds none."""
+    assert "halt_forgery" in {v["kind"] for v in T.check_blocked_halts([ev("planner", "BLOCKED")])}
+

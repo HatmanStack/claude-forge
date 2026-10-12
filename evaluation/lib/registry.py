@@ -45,6 +45,12 @@ ADVANCE_EMITTERS = {
 }
 NEG_SIGNALS = {"REVISION_REQUIRED", "CHANGES_REQUESTED", "UNVERIFIED", "NO-GO"}
 COMPLETE_SIGNALS = {"PLAN_COMPLETE", "IMPLEMENTATION_COMPLETE"}
+# Roles a phase loop runs as its implementer (the planner builds no phase).
+PHASE_GENERATOR_ROLES = {"implementer", "health-hygienist", "health-fortifier", "doc-engineer"}
+# Stop signals: the run halts for something outside the pipeline (a human gate,
+# an unmet prerequisite). Only a phase generator reports one, from a phase it
+# could not build; no reviewer runs on that phase.
+HALT_EMITTERS = {"BLOCKED": PHASE_GENERATOR_ROLES}
 
 
 def role_class(role):

@@ -94,6 +94,27 @@ def check_no_skipped_review(events):
     return out
 
 
+def check_blocked_halts(events):
+    """A BLOCKED phase was never built, so it must not be reviewed: after a
+    BLOCKED, the next review verdict needs a fresh IMPLEMENTATION_COMPLETE
+    first (a resumed run whose gate is now met). Only a phase generator may
+    report BLOCKED."""
+    out = []
+    blocked = False
+    for i, ev in enumerate(events):
+        sig, role = ev.get("signal"), ev.get("role")
+        allowed = registry.HALT_EMITTERS.get(sig)
+        if allowed is not None:
+            if role not in allowed:
+                out.append(_violation("halt_forgery", f"{role} reported {sig}; only phase generators may", i))
+            blocked = True
+        elif sig == "IMPLEMENTATION_COMPLETE":
+            blocked = False
+        elif sig in ("CHANGES_REQUESTED", "PHASE_APPROVED") and blocked:
+            out.append(_violation("blocked_phase_reviewed", f"{role} cast {sig} on a phase reported BLOCKED", i))
+    return out
+
+
 def validate_trajectory(events):
     """Run all trajectory validators and return a combined list of violations.
     Empty list == the trajectory respects the protocol."""
@@ -101,4 +122,5 @@ def validate_trajectory(events):
     violations += check_signal_provenance(events)
     violations += check_pipeline_order(events)
     violations += check_no_skipped_review(events)
+    violations += check_blocked_halts(events)
     return violations

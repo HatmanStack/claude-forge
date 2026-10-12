@@ -104,6 +104,16 @@ After each task:
 - Check build
 - Run linters if specified
 
+## Blocked Phases
+
+Before changing anything, check the phase's preconditions: the prerequisites `Phase-N.md` lists, and any human gate in `README.md` (such as a `## Human Gates` section) that applies to this phase. If one is not met (an owner action that hasn't happened, an approval not given, an earlier output that doesn't exist), the phase is blocked:
+
+1. Change nothing: no code, no commits, no checkbox updates.
+1. Append `BLOCKED — Phase N: <what is unmet>` as one line under `## Gate Log` in `docs/plans/<plan_id>/feedback.md`.
+1. Report `BLOCKED`, naming the gate or prerequisite as the plan names it (in a `/forge:run` workflow, in the `blockedOn` field).
+
+Never report `IMPLEMENTATION_COMPLETE` for a phase you could not build, and never move review items to Resolved Feedback for one. A blocked phase is not reviewed; the pipeline stops until the owner meets the gate. On a later run, check the gate again first. If it is met, append `UNBLOCKED — Phase N` under `## Gate Log`, so a later resume no longer treats the phase as blocked, then do the phase normally, including any OPEN review items.
+
 ## Handling Review Feedback
 
 When you receive `CHANGES_REQUESTED` from the Code Reviewer:
@@ -112,7 +122,7 @@ When you receive `CHANGES_REQUESTED` from the Code Reviewer:
 2. Find all OPEN items tagged `CODE_REVIEW`
 3. Address each item — the rhetorical questions guide your thinking, not your exact fix
 4. Move resolved feedback items to "Resolved Feedback" section with a resolution note
-5. Re-emit `IMPLEMENTATION_COMPLETE`
+5. Re-emit `IMPLEMENTATION_COMPLETE`, or `BLOCKED` if the phase is blocked (see Blocked Phases)
 
 **DO NOT** ignore or skip feedback items. Each must be addressed.
 
@@ -191,7 +201,8 @@ SendMessage(to="main", summary="<short label>", message="<your full report>")
 ```
 
 The message body carries your full report and ends with your signal on its own
-final line: `IMPLEMENTATION_COMPLETE`.
+final line: `IMPLEMENTATION_COMPLETE`, or `BLOCKED` for a phase you could not build (see
+Blocked Phases).
 
 Emitting that signal as ordinary response text does **not** deliver it. The
 orchestrator sees only an idle notification, cannot route the pipeline, and must

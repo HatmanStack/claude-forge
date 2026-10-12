@@ -26,6 +26,7 @@ Shared contract defining stage sequencing, signals, and communication channels f
 | PLAN_APPROVED           | Plan Reviewer   | Implementer                              | Begin phase implementation                                    |
 | IMPLEMENTATION_COMPLETE | Implementer     | Reviewer                                 | Review code against plan                                      |
 | CHANGES_REQUESTED       | Reviewer        | Implementer                              | Check feedback.md, fix issues, re-emit IMPLEMENTATION_COMPLETE|
+| BLOCKED                 | Implementer (any phase generator) | Orchestrator stops         | A prerequisite or human gate is unmet: nothing was built, no review runs, the run stops with verdict BLOCKED |
 | PHASE_APPROVED          | Reviewer        | Next phase Implementer or Final Reviewer | Start next phase or final review                              |
 | GO                      | Final Reviewer  | Deploy pipeline                          | Production ready                                              |
 | NO-GO                   | Final Reviewer  | Planner or Implementer                   | Check feedback.md for scope of rework                         |
@@ -188,7 +189,9 @@ REWORK
 - Use rhetorical questions (Consider / Think about / Reflect) -- don't provide answers
 - **Gates log decisions.** `## Gate Log` is an ordered, append-only log, one decision per line: the Plan Reviewer logs `PLAN_APPROVED`, a phase reviewer `PHASE_APPROVED — Phase N`, the Final Reviewer `GO` or `NO-GO`, the verifier `VERIFIED` or `UNVERIFIED` (listing unverified findings under `## Verification`). A rework begins by logging `REWORK`
 - **Rework adds phases; it never reopens one.** After a NO-GO or UNVERIFIED, rework starts by logging `REWORK`. The Planner fixes plan-level issues in the existing phase files and adds new Phase-N files for implementation fixes; the Plan Reviewer approves the revised plan; only the new phases are implemented and reviewed. Approved phases stay approved, so the log stays append-only and every line in it stays true
-- **Resume reads the log in order.** The current verdict is the last `GO`/`NO-GO`/`VERIFIED`/`UNVERIFIED` line unless a `REWORK` line follows it; the plan is approved only if a `PLAN_APPROVED` line follows the last `REWORK`; a phase is done when its `PHASE_APPROVED — Phase N` line is present. A decision that isn't logged is made again
+- **Blocked phases stop the run.** A phase generator that finds a prerequisite or a README human gate unmet changes nothing, logs `BLOCKED — Phase N: <what is unmet>`, and reports `BLOCKED`. The orchestrator runs no reviewer on that phase and stops with verdict `BLOCKED`. A resumed run starts the phase at its implementer, which re-checks the gate and, once it is met, logs `UNBLOCKED — Phase N` before building, so a later resume applies the normal review rules
+- **Two change requests on one commit stop the run.** If a reviewer returns `CHANGES_REQUESTED` on the same commit as its previous `CHANGES_REQUESTED` for a phase, the implementer committed nothing in between; the orchestrator stops with verdict `NO_PROGRESS` instead of spending the remaining rounds
+- **Resume reads the log in order.** The current verdict is the last `GO`/`NO-GO`/`VERIFIED`/`UNVERIFIED` line unless a `REWORK` line follows it; the plan is approved only if a `PLAN_APPROVED` line follows the last `REWORK`; a phase is done when its `PHASE_APPROVED — Phase N` line is present, and blocked when the last line naming it is `BLOCKED — Phase N: ...` (not an `UNBLOCKED — Phase N`). A decision that isn't logged is made again
 
 ## File Ownership
 
