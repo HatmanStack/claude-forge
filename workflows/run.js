@@ -102,7 +102,7 @@ const STATE = {
         type: 'object',
         properties: {
           n: { type: 'integer' },
-          status: { type: 'string', enum: ['approved', 'needs-fixes', 'needs-review', 'not-started'] },
+          status: { type: 'string', enum: ['approved', 'blocked', 'needs-fixes', 'needs-review', 'not-started'] },
         },
         required: ['n', 'status'],
       },
@@ -120,7 +120,7 @@ const state = await agent(
 - From ${DIR}/feedback.md (absent means nothing recorded). Its "## Gate Log" section lists gate decisions one per line, oldest first:
   - planApproved: the log has a PLAN_APPROVED line after its last REWORK line (or it has no REWORK line), and no PLAN_REVIEW item is OPEN.
   - openPlanReview: an item tagged PLAN_REVIEW has "**Status:** OPEN".
-  - phaseStatus, per phase: "approved" if the log has "PHASE_APPROVED — Phase N"; else "needs-fixes" if a CODE_REVIEW item for Phase N is OPEN; else "needs-review" if CODE_REVIEW items for Phase N are all resolved, or \`git log --oneline\` shows commits for phase N but it has no review entries; else "not-started".
+  - phaseStatus, per phase: "approved" if the log has "PHASE_APPROVED — Phase N"; else "blocked" if the last Gate Log line naming Phase N is a BLOCKED line ("BLOCKED — Phase N: ..."); else "needs-fixes" if a CODE_REVIEW item for Phase N is OPEN; else "needs-review" if CODE_REVIEW items for Phase N are all resolved, or \`git log --oneline\` shows commits for phase N but it has no review entries; else "not-started".
   - finalVerdict: the last GO, NO-GO, VERIFIED or UNVERIFIED line in the log; NONE if there is none, or if a REWORK line comes after it.
 - evalCalibrated: eval.md exists and has a "## Calibration" section.`,
   { label: 'recover-state', model: 'sonnet', effort: 'low', schema: STATE },
@@ -284,8 +284,12 @@ Signal VERIFIED if all findings are verified and tests pass; otherwise UNVERIFIE
 
 const PLAN_REPORT = report(['PLAN_COMPLETE'], { phases: PHASE_LIST })
 const PLAN_REVIEW = report(['PLAN_APPROVED', 'REVISION_REQUIRED'])
-const IMPL_REPORT = report(['IMPLEMENTATION_COMPLETE'])
-const CODE_REVIEW = report(['PHASE_APPROVED', 'CHANGES_REQUESTED'])
+const IMPL_REPORT = report(['IMPLEMENTATION_COMPLETE', 'BLOCKED'], {
+  blockedOn: { type: 'string', description: 'BLOCKED only: the unmet prerequisite or human gate, named as the plan names it. Empty string otherwise.' },
+})
+const CODE_REVIEW = report(['PHASE_APPROVED', 'CHANGES_REQUESTED'], {
+  head: { type: 'string', description: 'The commit you reviewed: the output of `git rev-parse HEAD`.' },
+})
 const FINAL_REPORT = report(['GO', 'NO-GO'], {
   planLevelIssues: { type: 'array', items: { type: 'string' } },
   implementationLevelIssues: { type: 'array', items: { type: 'string' } },
@@ -334,8 +338,13 @@ async function phaseLoop(ph, status) {
   const tag = ph.tag === 'NONE' ? DEFAULT_TAG[FLOW] : ph.tag
   const [impl, rev] = PAIRS[tag]
   const label = `Phase ${ph.n}${ph.tag === 'NONE' ? '' : ` [${tag}]`}`
+  // A blocked phase always restarts at its implementer, which re-checks the
+  // gate; reviewing a phase that was never built only produces noise.
   let implTask = status === 'needs-review' ? null
     : status === 'needs-fixes' ? fixTask(ph.n)
+    : status === 'blocked' ? `Phase: ${ph.n}
+
+Phase ${ph.n} was BLOCKED on a prerequisite or human gate when the pipeline last stopped (see "## Gate Log" in ${DIR}/feedback.md). Re-check it against ${DIR}/README.md and ${DIR}/Phase-${ph.n}.md. If it is now met, implement all tasks in Phase-${ph.n} following TDD with atomic commits.${blockedRule(ph.n)}`
     : `Phase: ${ph.n}
 
 Read these files in order:
@@ -344,11 +353,17 @@ Read these files in order:
 3. ${DIR}/Phase-${ph.n}.md
 4. ${DIR}/feedback.md (check for OPEN CODE_REVIEW items)
 
-Implement all tasks in Phase-${ph.n} following TDD. Make atomic commits.`
+Implement all tasks in Phase-${ph.n} following TDD. Make atomic commits.${blockedRule(ph.n)}`
+  let changesHead = null  // HEAD of the last CHANGES_REQUESTED, for the no-progress guard
   for (let i = 1; i <= MAX_ITER; i++) {
     if (implTask) {
       const r = await role(impl, task(implTask), IMPL_REPORT, { label: `${impl} p${ph.n} #${i}`, phase: 'Implement' })
       if (!r) return { ok: false, why: `${label}: ${impl} failed` }
+      if (r.signal === 'BLOCKED') {
+        const blockedOn = (r.blockedOn || '').trim() || 'a prerequisite (the implementer named none)'
+        history.push(`${label} implementation ${i}: BLOCKED on ${blockedOn}`)
+        return { ok: false, verdict: 'BLOCKED', phase: ph.n, blockedOn, why: `${label} is blocked on: ${blockedOn}` }
+      }
     }
     const v = await role(rev, task(`Phase: ${ph.n}
 
@@ -358,13 +373,21 @@ Review the Phase ${ph.n} implementation:
 3. If feedback.md has CODE_REVIEW items for Phase ${ph.n}, check each OPEN one was resolved
 4. Verify implementation matches spec using Read, Glob, Grep
 5. Run tests and build with Bash
-6. Check git commits
+6. Check git commits, and report the commit you reviewed (\`git rev-parse HEAD\`) as head
 
 If issues found: write feedback to ${DIR}/feedback.md tagged CODE_REVIEW and signal CHANGES_REQUESTED.
 If implementation is good: record the approval in feedback.md and signal PHASE_APPROVED.`), CODE_REVIEW, { label: `${rev} p${ph.n} #${i}`, phase: 'Implement' })
     if (!v) return { ok: false, why: `${label}: ${rev} failed` }
     history.push(`${label} review ${i}: ${v.signal}`)
     if (v.signal === 'PHASE_APPROVED') { log(`${label} approved after ${i} iteration(s)`); return { ok: true } }
+    // No-progress guard: a second change request on the same commit means the
+    // implementer committed nothing in between; more rounds would repeat it.
+    const head = /^[0-9a-f]{7,40}$/.test(v.head || '') ? v.head : null
+    if (head && head === changesHead) {
+      return { ok: false, verdict: 'NO_PROGRESS', phase: ph.n, head,
+        why: `${label} made no progress: the reviewer requested changes twice on commit ${head} and the implementer committed nothing in between` }
+    }
+    changesHead = head
     implTask = fixTask(ph.n)
   }
   return { ok: false, why: `${label} not approved after ${MAX_ITER} iterations` }
@@ -375,7 +398,15 @@ function fixTask(n) {
 
 The Code Reviewer has requested changes. Read ${DIR}/feedback.md for OPEN items tagged CODE_REVIEW for Phase ${n}.
 
-Address each item. Move resolved feedback to "Resolved Feedback" with a resolution note. Continue following TDD.`
+Address each item. Move resolved feedback to "Resolved Feedback" with a resolution note. Continue following TDD.${blockedRule(n)}`
+}
+
+// Every implementer task carries the same way out for a phase that cannot be
+// built yet, so a block is reported as one, never dressed up as a fix.
+function blockedRule(n) {
+  return `
+
+If a prerequisite Phase-${n}.md names, or a human gate in README.md that applies to Phase ${n}, is not met: change nothing, append the line "BLOCKED — Phase ${n}: <what is unmet>" under "## Gate Log" in ${DIR}/feedback.md, and signal BLOCKED with blockedOn naming that gate or prerequisite as the plan names it. Do not move review items to Resolved Feedback for a phase you did not build.`
 }
 
 async function runPhases(phases, statusOf) {
@@ -389,7 +420,19 @@ async function runPhases(phases, statusOf) {
   return { ok: true }
 }
 
-const stopped = (why) => ({ verdict: 'MAX_ITERATIONS', flow: FLOW, message: `Pipeline paused: ${why}. Unresolved items are in ${DIR}/feedback.md.`, history })
+// A run that stops early says why: a blocked gate, a stalled loop, or a loop
+// that ran out of rounds. Each needs a different next step from the owner.
+function stopped(r) {
+  if (r.verdict === 'BLOCKED') {
+    return { verdict: 'BLOCKED', flow: FLOW, phase: r.phase, blockedOn: r.blockedOn, history,
+      message: `Pipeline stopped: Phase ${r.phase} is blocked on ${r.blockedOn}. Nothing was changed for it. Once that is met, run /forge:run ${PLAN}; the phase restarts at its implementer, which re-checks it.` }
+  }
+  if (r.verdict === 'NO_PROGRESS') {
+    return { verdict: 'NO_PROGRESS', flow: FLOW, phase: r.phase, head: r.head, history,
+      message: `Pipeline stopped: ${r.why}. Read the OPEN CODE_REVIEW items for Phase ${r.phase} in ${DIR}/feedback.md, resolve what is stopping the implementer, then run /forge:run ${PLAN}.` }
+  }
+  return { verdict: 'MAX_ITERATIONS', flow: FLOW, message: `Pipeline paused: ${r.why}. Unresolved items are in ${DIR}/feedback.md.`, history }
+}
 
 // ---------------------------------------------------------------------------
 // repo-eval: calibrate the three evaluators' scores before planning.
@@ -429,7 +472,7 @@ if (input.rework && (state.finalVerdict === 'NO-GO' || state.finalVerdict === 'U
 Revise the plan to address them: fix plan-level issues in the existing phase files, and add new Phase-N.md files (numbered after the last existing phase) for implementation work. Tag new phases the same way as existing ones.${state.finalVerdict === 'NO-GO'
     ? ' Move each FINAL_REVIEW item you plan for to "Resolved Feedback" with a resolution naming the phase that addresses it.'
     : ''}`, false)
-  if (!plan.ok) return stopped(plan.why)
+  if (!plan.ok) return stopped(plan)
   planApproved = true
   // New phases start unreviewed; previously approved phases stay approved.
   phases = plan.phases || phases
@@ -443,14 +486,14 @@ if (!planApproved) {
   // review. Never re-send the creation task over an existing plan.
   const opening = state.planFilesExist ? (state.openPlanReview ? REVISE_PLAN : null) : PLANNER_TASK[FLOW]
   const plan = await planLoop(opening, opening === null)
-  if (!plan.ok) return stopped(plan.why)
+  if (!plan.ok) return stopped(plan)
   phases = plan.phases || phases
   log(`Plan approved after ${plan.iterations} iteration(s); ${phases.length} phase(s)`)
 }
 if (!phases || !phases.length) return { verdict: 'ERROR', flow: FLOW, message: 'Plan approved but no phases were reported.', history }
 
 let impl = await runPhases(phases, n => statusMap.get(n) || 'not-started')
-if (!impl.ok) return stopped(impl.why)
+if (!impl.ok) return stopped(impl)
 
 phase('Final gate')
 if (FLOW === 'feature') {
@@ -497,8 +540,8 @@ Record the result in ${DIR}/feedback.md: log VERIFIED or UNVERIFIED as a line un
 Create a NEW remediation plan addressing ONLY the unverified items. Previous plan files exist — create new Phase-N.md files starting after the last existing phase number.
 
 Tag every phase with [HYGIENIST], [IMPLEMENTER], [FORTIFIER], or [DOC-ENGINEER].`, false)
-  if (!plan.ok) return stopped(plan.why)
+  if (!plan.ok) return stopped(plan)
   phases = plan.phases || phases
   impl = await runPhases(phases, n => (before.has(n) ? 'approved' : 'not-started'))
-  if (!impl.ok) return stopped(impl.why)
+  if (!impl.ok) return stopped(impl)
 }

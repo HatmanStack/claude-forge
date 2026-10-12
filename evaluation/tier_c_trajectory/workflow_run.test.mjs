@@ -29,7 +29,7 @@ async function run({ state = {}, replies = {}, args = '2026-01-01-demo' } = {}) 
   const queues = Object.fromEntries(Object.entries(replies).map(([k, v]) => [k, [...v]]))
   const agent = async (prompt, opts = {}) => {
     const name = (opts.agentType || opts.label || '').replace(/^forge:/, '')
-    calls.push({ name, model: opts.model, effort: opts.effort, agentType: opts.agentType, label: opts.label, prompt })
+    calls.push({ name, model: opts.model, effort: opts.effort, agentType: opts.agentType, label: opts.label, prompt, schema: opts.schema })
     if (opts.label === 'recover-state') return { ...STATE, ...state }
     if (opts.label === 'calibrate-eval') return 'calibrated'
     const q = queues[name]
@@ -351,5 +351,105 @@ test('verifiers and the final reviewer log their verdicts in the gate log', asyn
     replies: { reviewer: [{ signal: 'UNVERIFIED', unverified: ['a'] }] },
   })
   assert.match(audit.calls.find(c => c.name === 'reviewer').prompt, /log VERIFIED or UNVERIFIED as a line under "## Gate Log"/)
+})
+
+// ---- Blocked phases and the no-progress guard -----------------------------
+// Seen in a live run: a phase waiting on a human gate ran implementer <->
+// reviewer three times on an unchanged HEAD, because IMPLEMENTATION_COMPLETE
+// was the only thing an implementer could say, and ended as MAX_ITERATIONS.
+
+const GATE = 'human gate 1: the owner captures a live LinkedIn session'
+const ONE_PHASE = [{ n: 1, title: 'Phase 1', tag: 'NONE' }]
+
+test('a blocked phase stops after one implementer turn, with no review and a BLOCKED verdict', async () => {
+  const { result, roles, calls } = await run({
+    state: { planFilesExist: true, planApproved: true, phases: TWO_PHASES },
+    replies: { implementer: [{ signal: 'BLOCKED', blockedOn: GATE }] },
+  })
+  assert.deepEqual(roles, ['implementer'])
+  assert.equal(result.verdict, 'BLOCKED')
+  assert.equal(result.phase, 1)
+  assert.equal(result.blockedOn, GATE)
+  assert.match(result.message, /human gate 1/)
+  assert.match(result.message, /\/forge:run 2026-01-01-demo/)
+  const impl = calls.find(c => c.name === 'implementer')
+  assert.match(impl.prompt, /BLOCKED — Phase 1: <what is unmet>/)
+  assert.ok(impl.schema.properties.signal.enum.includes('BLOCKED'))
+  assert.ok(impl.schema.required.includes('blockedOn'))
+})
+
+test('a phase blocked during a fix round stops there too', async () => {
+  const { result, roles } = await run({
+    state: { planFilesExist: true, planApproved: true, phases: ONE_PHASE },
+    replies: {
+      implementer: ['IMPLEMENTATION_COMPLETE', { signal: 'BLOCKED', blockedOn: GATE }],
+      reviewer: [{ signal: 'CHANGES_REQUESTED', head: 'a1b2c3d' }],
+    },
+  })
+  assert.equal(result.verdict, 'BLOCKED')
+  assert.deepEqual(roles, ['implementer', 'reviewer', 'implementer'])
+})
+
+test('BLOCKED without a named gate still stops, and says the implementer named none', async () => {
+  const { result } = await run({
+    state: { planFilesExist: true, planApproved: true, phases: ONE_PHASE },
+    replies: { implementer: [{ signal: 'BLOCKED', blockedOn: '  ' }] },
+  })
+  assert.equal(result.verdict, 'BLOCKED')
+  assert.match(result.blockedOn, /named none/)
+})
+
+test('a resumed blocked phase restarts at its implementer, never its reviewer', async () => {
+  const { result, roles, calls } = await run({
+    state: {
+      planFilesExist: true, planApproved: true, phases: TWO_PHASES,
+      phaseStatus: [{ n: 1, status: 'approved' }, { n: 2, status: 'blocked' }],
+    },
+    replies: { implementer: ['IMPLEMENTATION_COMPLETE'], reviewer: ['PHASE_APPROVED'], 'final-reviewer': ['GO'] },
+  })
+  assert.equal(result.verdict, 'GO')
+  assert.deepEqual(roles, ['implementer', 'reviewer', 'final-reviewer'])
+  assert.match(calls.find(c => c.name === 'implementer').prompt, /was BLOCKED/)
+  const recover = calls.find(c => c.label === 'recover-state')
+  assert.ok(recover.schema.properties.phaseStatus.items.properties.status.enum.includes('blocked'))
+  assert.match(recover.prompt, /"blocked" if the last Gate Log line naming Phase N is a BLOCKED line/)
+})
+
+test('two change requests on the same HEAD stop the phase as NO_PROGRESS', async () => {
+  const { result, roles, calls } = await run({
+    state: { planFilesExist: true, planApproved: true, phases: ONE_PHASE },
+    replies: {
+      implementer: Array(2).fill('IMPLEMENTATION_COMPLETE'),
+      reviewer: [{ signal: 'CHANGES_REQUESTED', head: 'a1b2c3d' }, { signal: 'CHANGES_REQUESTED', head: 'a1b2c3d' }],
+    },
+  })
+  assert.equal(result.verdict, 'NO_PROGRESS')
+  assert.deepEqual(roles, ['implementer', 'reviewer', 'implementer', 'reviewer'])
+  assert.match(result.message, /a1b2c3d/)
+  const rev = calls.find(c => c.name === 'reviewer')
+  assert.ok(rev.schema.required.includes('head'))
+})
+
+test('change requests on different HEADs are progress; the loop runs to its limit', async () => {
+  const { result, roles } = await run({
+    state: { planFilesExist: true, planApproved: true, phases: ONE_PHASE },
+    replies: {
+      implementer: Array(3).fill('IMPLEMENTATION_COMPLETE'),
+      reviewer: ['a1b2c3d', 'b2c3d4e', 'c3d4e5f'].map(head => ({ signal: 'CHANGES_REQUESTED', head })),
+    },
+  })
+  assert.equal(result.verdict, 'MAX_ITERATIONS')
+  assert.equal(roles.length, 6)
+})
+
+test('an unusable HEAD never trips the no-progress guard', async () => {
+  const { result } = await run({
+    state: { planFilesExist: true, planApproved: true, phases: ONE_PHASE },
+    replies: {
+      implementer: Array(3).fill('IMPLEMENTATION_COMPLETE'),
+      reviewer: Array(3).fill({ signal: 'CHANGES_REQUESTED', head: 'unknown' }),
+    },
+  })
+  assert.equal(result.verdict, 'MAX_ITERATIONS')
 })
 
