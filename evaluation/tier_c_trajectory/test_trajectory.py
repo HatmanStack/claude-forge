@@ -159,3 +159,9 @@ def test_reviewing_a_blocked_phase_is_caught():
 def test_only_a_generator_may_report_blocked():
     run = [ev("reviewer", "BLOCKED")]
     assert "halt_forgery" in {v["kind"] for v in T.check_blocked_halts(run)}
+
+
+def test_a_planner_may_not_report_blocked():
+    """BLOCKED reports a phase that could not be built; the planner builds none."""
+    assert "halt_forgery" in {v["kind"] for v in T.check_blocked_halts([ev("planner", "BLOCKED")])}
+

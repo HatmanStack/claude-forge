@@ -56,7 +56,7 @@ signals against protocol invariants:
 - **signal provenance** — only authorized roles cast `PLAN_APPROVED` / `PHASE_APPROVED` / `GO` / `VERIFIED` (a generator casting one is a forged ballot)
 - **gate order** — no `PHASE_APPROVED` before the plan is approved; no `GO`/`VERIFIED` before a phase is approved
 - **no skipped review** — every `PHASE_APPROVED` is backed by an `IMPLEMENTATION_COMPLETE`
-- **blocked halts** — no review verdict on a phase reported `BLOCKED` until a fresh `IMPLEMENTATION_COMPLETE`, and only generators report `BLOCKED`
+- **blocked halts** — no review verdict on a phase reported `BLOCKED` until a fresh `IMPLEMENTATION_COMPLETE`, and only the four phase generators report `BLOCKED`
 
 The per-PR tests run these against synthetic legal/illegal trajectories. For real
 runs, the trace hook persists `trace-summary.json` into its per-session state
@@ -82,7 +82,7 @@ returns scripted reports, and asserts on the sequence of roles it spawns:
 - phase tags routing to their implementer/reviewer pair, and each flow's default pair
 - the unified audit re-planning significant unverified findings exactly once
 - a recorded verdict stopping the run unless `rework` is passed
-- a `BLOCKED` phase stopping after one implementer turn with no review, and restarting at its implementer on resume
+- a `BLOCKED` phase stopping after one implementer turn with no review (its Gate Log line ensured), and restarting at its implementer on resume, which logs `UNBLOCKED` once the gate is met
 - the no-progress guard: two change requests on the same commit stop the phase as `NO_PROGRESS`; different commits, or a commit the reviewer couldn't report, keep the loop going
 - every agent pinning a non-Fable model, and no agent asked to write under `.claude/`
 

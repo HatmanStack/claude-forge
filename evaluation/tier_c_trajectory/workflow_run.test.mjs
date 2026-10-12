@@ -32,6 +32,7 @@ async function run({ state = {}, replies = {}, args = '2026-01-01-demo' } = {}) 
     calls.push({ name, model: opts.model, effort: opts.effort, agentType: opts.agentType, label: opts.label, prompt, schema: opts.schema })
     if (opts.label === 'recover-state') return { ...STATE, ...state }
     if (opts.label === 'calibrate-eval') return 'calibrated'
+    if (opts.label === 'log-blocked') return 'logged'
     const q = queues[name]
     if (!q || !q.length) throw new Error(`unscripted call to ${name} (${opts.label})`)
     const r = q.shift()
@@ -366,7 +367,9 @@ test('a blocked phase stops after one implementer turn, with no review and a BLO
     state: { planFilesExist: true, planApproved: true, phases: TWO_PHASES },
     replies: { implementer: [{ signal: 'BLOCKED', blockedOn: GATE }] },
   })
-  assert.deepEqual(roles, ['implementer'])
+  // One implementer turn, then only the bookkeeping that makes the block
+  // recoverable; never a reviewer.
+  assert.deepEqual(roles, ['implementer', 'log-blocked'])
   assert.equal(result.verdict, 'BLOCKED')
   assert.equal(result.phase, 1)
   assert.equal(result.blockedOn, GATE)
@@ -387,7 +390,7 @@ test('a phase blocked during a fix round stops there too', async () => {
     },
   })
   assert.equal(result.verdict, 'BLOCKED')
-  assert.deepEqual(roles, ['implementer', 'reviewer', 'implementer'])
+  assert.deepEqual(roles, ['implementer', 'reviewer', 'implementer', 'log-blocked'])
 })
 
 test('BLOCKED without a named gate still stops, and says the implementer named none', async () => {
@@ -409,10 +412,14 @@ test('a resumed blocked phase restarts at its implementer, never its reviewer', 
   })
   assert.equal(result.verdict, 'GO')
   assert.deepEqual(roles, ['implementer', 'reviewer', 'final-reviewer'])
-  assert.match(calls.find(c => c.name === 'implementer').prompt, /was BLOCKED/)
+  const recheck = calls.find(c => c.name === 'implementer').prompt
+  assert.match(recheck, /was BLOCKED/)
+  // A gate found met is logged, so a later resume no longer reads the phase as blocked.
+  assert.match(recheck, /append the line "UNBLOCKED — Phase 2"/)
+  assert.match(recheck, /OPEN CODE_REVIEW items/)
   const recover = calls.find(c => c.label === 'recover-state')
   assert.ok(recover.schema.properties.phaseStatus.items.properties.status.enum.includes('blocked'))
-  assert.match(recover.prompt, /"blocked" if the last Gate Log line naming Phase N is a BLOCKED line/)
+  assert.match(recover.prompt, /"blocked" if the last Gate Log line naming Phase N is a BLOCKED line .*an UNBLOCKED line after it means it is not/)
 })
 
 test('two change requests on the same HEAD stop the phase as NO_PROGRESS', async () => {
@@ -451,5 +458,28 @@ test('an unusable HEAD never trips the no-progress guard', async () => {
     },
   })
   assert.equal(result.verdict, 'MAX_ITERATIONS')
+})
+
+test('a BLOCKED verdict is recorded even if the implementer forgot to log it', async () => {
+  const { calls } = await run({
+    state: { planFilesExist: true, planApproved: true, phases: ONE_PHASE },
+    replies: { implementer: [{ signal: 'BLOCKED', blockedOn: GATE }] },
+  })
+  const log = calls.find(c => c.label === 'log-blocked')
+  assert.match(log.prompt, new RegExp(`BLOCKED — Phase 1: ${GATE}`))
+  assert.match(log.prompt, /only if/)
+  assert.equal(log.model, 'opus')
+})
+
+test('the no-progress guard accepts SHA-256 commit ids', async () => {
+  const sha256 = 'a'.repeat(64)
+  const { result } = await run({
+    state: { planFilesExist: true, planApproved: true, phases: ONE_PHASE },
+    replies: {
+      implementer: Array(2).fill('IMPLEMENTATION_COMPLETE'),
+      reviewer: Array(2).fill({ signal: 'CHANGES_REQUESTED', head: sha256 }),
+    },
+  })
+  assert.equal(result.verdict, 'NO_PROGRESS')
 })
 

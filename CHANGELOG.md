@@ -13,9 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **`BLOCKED` implementer signal and verdict.** When a prerequisite or a README human gate is unmet, a phase generator (implementer, hygienist, fortifier, doc engineer) changes nothing, logs `BLOCKED — Phase N: <what is unmet>` in the Gate Log, and reports `BLOCKED` with what it is waiting on. No reviewer runs. The run stops with verdict `BLOCKED`, naming the gate, and a resumed run restarts the phase at its implementer, which re-checks it. Both `/forge:run` and `/forge:pipeline`.
-- **No-progress guard.** Reviewers report the commit they reviewed; two `CHANGES_REQUESTED` on the same commit stop the run with verdict `NO_PROGRESS`.
-- **Evaluation:** a `check_blocked_halts` trajectory validator (no review of a blocked phase; only generators report `BLOCKED`); the trace hook records `BLOCKED` in `trace-summary.json`; workflow trajectory tests for the blocked stop, the resume entry, and the guard; Tier A contracts for the protocol table and every phase generator's prompt.
+- **`BLOCKED` implementer signal and verdict.** When a prerequisite or a README human gate is unmet, a phase generator (implementer, hygienist, fortifier, doc engineer) changes nothing, logs `BLOCKED — Phase N: <what is unmet>` in the Gate Log, and reports `BLOCKED` with what it is waiting on. No reviewer runs. The run stops with verdict `BLOCKED`, naming the gate; `/forge:run` makes sure the Gate Log line is there even if the implementer forgot it. A resumed run restarts the phase at its implementer, which re-checks the gate and, once it is met, logs `UNBLOCKED — Phase N` before building, so later resumes apply the normal review rules. Both `/forge:run` and `/forge:pipeline`.
+- **No-progress guard.** Reviewers report the commit they reviewed; two `CHANGES_REQUESTED` on the same commit (SHA-1 or SHA-256) stop the run with verdict `NO_PROGRESS`.
+- **Evaluation:** a `check_blocked_halts` trajectory validator (no review of a blocked phase; only the four phase generators report `BLOCKED`); the trace hook records `BLOCKED` in `trace-summary.json`; workflow trajectory tests for the blocked stop, the resume entry, and the guard; Tier A contracts for the protocol table and every phase generator's prompt.
 
 ### Changed
 

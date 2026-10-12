@@ -137,8 +137,10 @@ def test_feedback_template_records_no_decisions():
 PHASE_GENERATORS = {"implementer", "health-hygienist", "health-fortifier", "doc-engineer"}
 
 
-def test_blocked_is_a_registered_halt_signal_for_generators():
-    assert registry.HALT_EMITTERS == {"BLOCKED": registry.GENERATOR_ROLES}
+def test_blocked_is_a_registered_halt_signal_for_phase_generators():
+    """Only a role that builds phases can report one it could not build."""
+    assert registry.PHASE_GENERATOR_ROLES == PHASE_GENERATORS
+    assert registry.HALT_EMITTERS == {"BLOCKED": PHASE_GENERATORS}
 
 
 def test_protocol_and_phase_generators_define_blocked():
@@ -149,6 +151,8 @@ def test_protocol_and_phase_generators_define_blocked():
     for name in PHASE_GENERATORS:
         body = (registry.REPO_ROOT / "agents" / f"{name}.md").read_text()
         assert "`BLOCKED`" in body and "BLOCKED — Phase N" in body, name
+        assert "UNBLOCKED — Phase N" in body, name
+    assert "UNBLOCKED — Phase N" in protocol
 
 
 def test_trace_hook_records_halt_signals():

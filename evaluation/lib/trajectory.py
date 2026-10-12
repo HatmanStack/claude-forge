@@ -97,8 +97,8 @@ def check_no_skipped_review(events):
 def check_blocked_halts(events):
     """A BLOCKED phase was never built, so it must not be reviewed: after a
     BLOCKED, the next review verdict needs a fresh IMPLEMENTATION_COMPLETE
-    first (a resumed run whose gate is now met). Only a generator may report
-    BLOCKED."""
+    first (a resumed run whose gate is now met). Only a phase generator may
+    report BLOCKED."""
     out = []
     blocked = False
     for i, ev in enumerate(events):
@@ -106,7 +106,7 @@ def check_blocked_halts(events):
         allowed = registry.HALT_EMITTERS.get(sig)
         if allowed is not None:
             if role not in allowed:
-                out.append(_violation("halt_forgery", f"{role} reported {sig}; only generators may", i))
+                out.append(_violation("halt_forgery", f"{role} reported {sig}; only phase generators may", i))
             blocked = True
         elif sig == "IMPLEMENTATION_COMPLETE":
             blocked = False

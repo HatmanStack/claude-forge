@@ -120,7 +120,7 @@ const state = await agent(
 - From ${DIR}/feedback.md (absent means nothing recorded). Its "## Gate Log" section lists gate decisions one per line, oldest first:
   - planApproved: the log has a PLAN_APPROVED line after its last REWORK line (or it has no REWORK line), and no PLAN_REVIEW item is OPEN.
   - openPlanReview: an item tagged PLAN_REVIEW has "**Status:** OPEN".
-  - phaseStatus, per phase: "approved" if the log has "PHASE_APPROVED — Phase N"; else "blocked" if the last Gate Log line naming Phase N is a BLOCKED line ("BLOCKED — Phase N: ..."); else "needs-fixes" if a CODE_REVIEW item for Phase N is OPEN; else "needs-review" if CODE_REVIEW items for Phase N are all resolved, or \`git log --oneline\` shows commits for phase N but it has no review entries; else "not-started".
+  - phaseStatus, per phase: "approved" if the log has "PHASE_APPROVED — Phase N"; else "blocked" if the last Gate Log line naming Phase N is a BLOCKED line ("BLOCKED — Phase N: ...") (an UNBLOCKED line after it means it is not: the gate was met and the phase was taken up again, so apply the rules below); else "needs-fixes" if a CODE_REVIEW item for Phase N is OPEN; else "needs-review" if CODE_REVIEW items for Phase N are all resolved, or \`git log --oneline\` shows commits for phase N but it has no review entries; else "not-started".
   - finalVerdict: the last GO, NO-GO, VERIFIED or UNVERIFIED line in the log; NONE if there is none, or if a REWORK line comes after it.
 - evalCalibrated: eval.md exists and has a "## Calibration" section.`,
   { label: 'recover-state', model: 'sonnet', effort: 'low', schema: STATE },
@@ -344,7 +344,7 @@ async function phaseLoop(ph, status) {
     : status === 'needs-fixes' ? fixTask(ph.n)
     : status === 'blocked' ? `Phase: ${ph.n}
 
-Phase ${ph.n} was BLOCKED on a prerequisite or human gate when the pipeline last stopped (see "## Gate Log" in ${DIR}/feedback.md). Re-check it against ${DIR}/README.md and ${DIR}/Phase-${ph.n}.md. If it is now met, implement all tasks in Phase-${ph.n} following TDD with atomic commits.${blockedRule(ph.n)}`
+Phase ${ph.n} was BLOCKED on a prerequisite or human gate when the pipeline last stopped (see "## Gate Log" in ${DIR}/feedback.md). Re-check it against ${DIR}/README.md and ${DIR}/Phase-${ph.n}.md. If it is now met, first append the line "UNBLOCKED — Phase ${ph.n}" under "## Gate Log", then read ${DIR}/feedback.md for OPEN CODE_REVIEW items for Phase ${ph.n} and implement all tasks in Phase-${ph.n} following TDD with atomic commits.${blockedRule(ph.n)}`
     : `Phase: ${ph.n}
 
 Read these files in order:
@@ -362,6 +362,11 @@ Implement all tasks in Phase-${ph.n} following TDD. Make atomic commits.${blocke
       if (r.signal === 'BLOCKED') {
         const blockedOn = (r.blockedOn || '').trim() || 'a prerequisite (the implementer named none)'
         history.push(`${label} implementation ${i}: BLOCKED on ${blockedOn}`)
+        // Recovery finds a blocked phase by its Gate Log line; make sure it is
+        // there even if the implementer forgot, or the next run could start
+        // this phase at its reviewer.
+        await agent(`In ${DIR}/feedback.md, the last line under "## Gate Log" that names Phase ${ph.n} must be a BLOCKED line. Append the line "BLOCKED — Phase ${ph.n}: ${blockedOn}" under "## Gate Log" (adding the heading at the end of the file if it is missing) only if that is not already so. Change nothing else.`,
+          { label: 'log-blocked', model: 'opus', effort: 'low', phase: 'Implement' })
         return { ok: false, verdict: 'BLOCKED', phase: ph.n, blockedOn, why: `${label} is blocked on: ${blockedOn}` }
       }
     }
@@ -382,7 +387,7 @@ If implementation is good: record the approval in feedback.md and signal PHASE_A
     if (v.signal === 'PHASE_APPROVED') { log(`${label} approved after ${i} iteration(s)`); return { ok: true } }
     // No-progress guard: a second change request on the same commit means the
     // implementer committed nothing in between; more rounds would repeat it.
-    const head = /^[0-9a-f]{7,40}$/.test(v.head || '') ? v.head : null
+    const head = /^[0-9a-f]{7,64}$/.test(v.head || '') ? v.head : null  // SHA-1 or SHA-256
     if (head && head === changesHead) {
       return { ok: false, verdict: 'NO_PROGRESS', phase: ph.n, head,
         why: `${label} made no progress: the reviewer requested changes twice on commit ${head} and the implementer committed nothing in between` }

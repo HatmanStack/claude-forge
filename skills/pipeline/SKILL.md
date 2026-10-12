@@ -160,7 +160,7 @@ Before processing phases, determine each phase's completion state. For each Phas
 
 1. **Read** `docs/plans/$ARGUMENTS/feedback.md` and check for:
    - A `PHASE_APPROVED — Phase N` line in the Gate Log → phase is **done**, skip it
-   - The last Gate Log line naming Phase N is `BLOCKED — Phase N: ...` → phase is **blocked**, enter at step 2a (Implementer), which re-checks the gate. Never enter a blocked phase at the Reviewer: nothing was built
+   - The last Gate Log line naming Phase N is `BLOCKED — Phase N: ...` → phase is **blocked**, enter at step 2a (Implementer), which re-checks the gate. Never enter a blocked phase at the Reviewer: nothing was built. (An `UNBLOCKED — Phase N` line after it means the gate was met and the phase was taken up again; apply the rules below)
    - OPEN `CODE_REVIEW` items for Phase N → phase needs **review fixes**, enter at step 2a (Implementer) with revision instructions
    - Resolved `CODE_REVIEW` items for Phase N but no `PHASE_APPROVED` → phase needs **re-review**, enter at step 2b (Reviewer)
 2. **Check** `git log --oneline` for commits referencing Phase N (e.g., `phase-N`, `Phase N`, `phase N`)

@@ -84,7 +84,7 @@ Before changing anything, check the phase's preconditions: the prerequisites `Ph
 1. Append `BLOCKED — Phase N: <what is unmet>` as one line under `## Gate Log` in `docs/plans/<plan_id>/feedback.md`.
 1. Report `BLOCKED`, naming the gate or prerequisite as the plan names it (in a `/forge:run` workflow, in the `blockedOn` field).
 
-Never report `IMPLEMENTATION_COMPLETE` for a phase you could not build, and never move review items to Resolved Feedback for one. A blocked phase is not reviewed; the pipeline stops until the owner meets the gate. On a later run, check the gate again first, and if it is met, do the phase normally.
+Never report `IMPLEMENTATION_COMPLETE` for a phase you could not build, and never move review items to Resolved Feedback for one. A blocked phase is not reviewed; the pipeline stops until the owner meets the gate. On a later run, check the gate again first. If it is met, append `UNBLOCKED — Phase N` under `## Gate Log`, so a later resume no longer treats the phase as blocked, then do the phase normally, including any OPEN review items.
 
 ## Handling Review Feedback
 
