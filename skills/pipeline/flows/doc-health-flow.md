@@ -105,7 +105,7 @@ Loop until `PLAN_APPROVED` or max iterations.
 
 ## Stage 3: Implementation (Per-Phase Doc Engineer ↔ Doc Reviewer Adversarial Loop)
 
-**Max iterations per phase: 3.**
+**Max iterations per phase: 3.** Whichever implementer a phase uses, a `BLOCKED` report ends the run without a review, and two `CHANGES_REQUESTED` on the same commit end it as no progress, both as in `SKILL.md` Stage 2 (2a and 2c).
 
 Process phases sequentially. Agent spawn format matches main SKILL.md Stage 2, using subagent_type=forge:doc-engineer for the implementer and subagent_type=forge:doc-reviewer for the reviewer. Use `name="implementer-phase-N"` and `name="reviewer-phase-N"`, and address each continuation by that same bare name in subsequent `SendMessage(to=...)` calls.
 

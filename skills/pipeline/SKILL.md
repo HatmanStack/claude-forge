@@ -160,6 +160,7 @@ Before processing phases, determine each phase's completion state. For each Phas
 
 1. **Read** `docs/plans/$ARGUMENTS/feedback.md` and check for:
    - A `PHASE_APPROVED — Phase N` line in the Gate Log → phase is **done**, skip it
+   - The last Gate Log line naming Phase N is `BLOCKED — Phase N: ...` → phase is **blocked**, enter at step 2a (Implementer), which re-checks the gate. Never enter a blocked phase at the Reviewer: nothing was built
    - OPEN `CODE_REVIEW` items for Phase N → phase needs **review fixes**, enter at step 2a (Implementer) with revision instructions
    - Resolved `CODE_REVIEW` items for Phase N but no `PHASE_APPROVED` → phase needs **re-review**, enter at step 2b (Reviewer)
 2. **Check** `git log --oneline` for commits referencing Phase N (e.g., `phase-N`, `Phase N`, `phase N`)
@@ -171,7 +172,7 @@ A phase is only skip-eligible when the Gate Log has a `PHASE_APPROVED — Phase 
 Report the recovered state to the user before continuing:
 ```text
 Resume state for $ARGUMENTS:
-- Phase 1: [done | needs review | needs review fixes | needs implementation | not started]
+- Phase 1: [done | blocked on <gate> | needs review | needs review fixes | needs implementation | not started]
 - Phase 2: [...]
 Continuing from Phase N...
 ```
@@ -197,9 +198,13 @@ Read these files in order:
 
 Implement all tasks in Phase-N following TDD. Make atomic commits.
 
-When complete, report with: IMPLEMENTATION_COMPLETE
+If a prerequisite Phase-N.md names, or a human gate in README.md that applies to Phase N, is not met: change nothing, append "BLOCKED — Phase N: <what is unmet>" under "## Gate Log" in feedback.md, and report BLOCKED naming that gate or prerequisite as the plan names it.
+
+When complete, report with: IMPLEMENTATION_COMPLETE (or BLOCKED)
 </task>
 ```
+
+**If the implementer reports `BLOCKED`, do not spawn the Reviewer.** Confirm the `BLOCKED — Phase N` line is in the Gate Log (append it if the implementer did not), then stop the pipeline and report it with the **On BLOCKED** template below. A blocked phase was never built; reviewing it only repeats the block.
 
 #### 2b: Spawn Reviewer (once per phase)
 
@@ -215,7 +220,7 @@ Review the Phase N implementation:
 2. Read docs/plans/$ARGUMENTS/Phase-N.md (the spec)
 3. Verify implementation matches spec using Read, Glob, Grep
 4. Run tests and build with Bash
-5. Check git commits
+5. Check git commits, and state the commit you reviewed (`git rev-parse HEAD`) in your report
 
 If issues found: write feedback to docs/plans/$ARGUMENTS/feedback.md tagged CODE_REVIEW, then end with: CHANGES_REQUESTED
 If implementation is good: end with: PHASE_APPROVED
@@ -231,23 +236,26 @@ If implementation is good: end with: PHASE_APPROVED
 ```text
 The Code Reviewer has requested changes. Read docs/plans/$ARGUMENTS/feedback.md for OPEN items tagged CODE_REVIEW.
 
-Address each item. Move resolved feedback to "Resolved Feedback" with a resolution note. Continue following TDD.
+Address each item. Move resolved feedback to "Resolved Feedback" with a resolution note. Continue following TDD. If the phase turns out to be blocked on a prerequisite or human gate, follow your Blocked Phases instructions instead.
 
-When complete, report with: IMPLEMENTATION_COMPLETE
+When complete, report with: IMPLEMENTATION_COMPLETE (or BLOCKED)
 ```
 
-- After the implementer responds, use **SendMessage** with `to="reviewer-phase-N"`:
+- If the implementer reports `BLOCKED` → do not message the Reviewer; handle it as in 2a (confirm the Gate Log line, stop, **On BLOCKED** template).
+- After the implementer reports `IMPLEMENTATION_COMPLETE`, use **SendMessage** with `to="reviewer-phase-N"`:
 
 ```text
 The Implementer has addressed the feedback. Re-review the changes:
 1. Check that OPEN CODE_REVIEW items in feedback.md were resolved
 2. Run tests and build
 3. Verify fixes are correct
+4. State the commit you reviewed (`git rev-parse HEAD`)
 
 If new issues found: write new feedback, end with: CHANGES_REQUESTED
 If all resolved: end with: PHASE_APPROVED
 ```
 
+- **No-progress guard:** if the Reviewer returns `CHANGES_REQUESTED` on the same commit as its previous `CHANGES_REQUESTED` for this phase, the implementer committed nothing in between. Stop and report it with the **On No Progress** template; more rounds would repeat the same review
 - Loop until `PHASE_APPROVED` or max iterations (3) reached
 - **NEVER spawn a new Implementer or Reviewer agent for the same phase.** Always use `SendMessage` to continue the existing agents.
 
@@ -296,7 +304,7 @@ Before reporting the final verdict, append an entry to `.claude/skill-runs.json`
   "skill": "pipeline",
   "date": "YYYY-MM-DD",
   "plan": "$ARGUMENTS",
-  "verdict": "GO | NO-GO | MAX_ITERATIONS"
+  "verdict": "GO | NO-GO | BLOCKED | NO_PROGRESS | MAX_ITERATIONS"
 }
 ```
 
@@ -344,6 +352,28 @@ C) Ship with caveats (if issues are minor)
 2. Re-enter Stage 1: the Planner reads the `FINAL_REVIEW` items, fixes **plan-level** issues (architecture flaw, missing phase) in the existing phase files, and adds new Phase-N files, numbered after the last one, for **implementation-level** issues (bug, missing test, security). It moves each `FINAL_REVIEW` item to Resolved Feedback, naming the phase that addresses it.
 3. The Plan Reviewer reviews the revised plan; its `PLAN_APPROVED` after the `REWORK` line approves it.
 4. Stage 2 runs only the new phases; phases approved before the rework stay approved. Then Stage 3 as usual.
+
+### On BLOCKED
+
+```text
+Pipeline stopped for $ARGUMENTS.
+
+Phase N is blocked on: [the gate or prerequisite, as the implementer named it]
+Nothing was changed for Phase N. Phases before it are approved.
+
+Once that is met, re-run: /pipeline $ARGUMENTS
+Phase N restarts at its implementer, which re-checks it.
+```
+
+### On No Progress
+
+```text
+Pipeline stopped for $ARGUMENTS.
+
+Phase N made no progress: the reviewer requested changes twice on commit [sha], and the implementer committed nothing in between.
+
+Read the OPEN CODE_REVIEW items for Phase N in docs/plans/$ARGUMENTS/feedback.md, resolve what is stopping the implementer, then re-run: /pipeline $ARGUMENTS
+```
 
 ### On Max Iterations Reached
 

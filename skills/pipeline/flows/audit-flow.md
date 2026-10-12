@@ -136,7 +136,7 @@ Loop until `PLAN_APPROVED` or max iterations.
 
 ## Stage 2: Implementation (Per-Phase Adversarial Loops)
 
-**Max iterations per phase: 3.**
+**Max iterations per phase: 3.** Whichever implementer a phase uses, a `BLOCKED` report ends the run without a review, and two `CHANGES_REQUESTED` on the same commit end it as no progress, both as in `SKILL.md` Stage 2 (2a and 2c).
 
 Identify all phases by Glob for `docs/plans/$ARGUMENTS/Phase-*.md` (excluding Phase-0). Process sequentially.
 

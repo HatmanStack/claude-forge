@@ -138,7 +138,7 @@ Loop until `PLAN_APPROVED` or max iterations.
 
 ## Stage 3: Implementation (Per-Phase Implementer ↔ Reviewer Adversarial Loop)
 
-**Max iterations per phase: 3.**
+**Max iterations per phase: 3.** Whichever implementer a phase uses, a `BLOCKED` report ends the run without a review, and two `CHANGES_REQUESTED` on the same commit end it as no progress, both as in `SKILL.md` Stage 2 (2a and 2c).
 
 Standard implementation process — see main SKILL.md Stage 2 (including State Recovery for per-phase resume detection). The implementer executes the remediation plan using subagent_type=forge:implementer.
 

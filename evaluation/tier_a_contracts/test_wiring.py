@@ -141,6 +141,16 @@ def test_blocked_is_a_registered_halt_signal_for_generators():
     assert registry.HALT_EMITTERS == {"BLOCKED": registry.GENERATOR_ROLES}
 
 
+def test_protocol_and_phase_generators_define_blocked():
+    """Every role a phase loop runs as its implementer can report BLOCKED, and
+    the protocol's signal table says what the orchestrator does with it."""
+    protocol = (registry.REPO_ROOT / "skills" / "pipeline" / "pipeline-protocol.md").read_text()
+    assert "| BLOCKED" in protocol
+    for name in PHASE_GENERATORS:
+        body = (registry.REPO_ROOT / "agents" / f"{name}.md").read_text()
+        assert "`BLOCKED`" in body and "BLOCKED — Phase N" in body, name
+
+
 def test_trace_hook_records_halt_signals():
     """BLOCKED reaches trace-summary.json, so check_run.py can validate it."""
     mod = _load_hook()

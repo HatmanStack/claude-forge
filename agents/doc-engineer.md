@@ -76,6 +76,16 @@ As you complete tasks, use **Edit** to mark checkboxes in `Phase-N.md` from `[ ]
 
 **Markdown lint:** When editing or creating any markdown files, fenced code blocks must have language tags, headings must not end with punctuation, use `1.` for all ordered list items.
 
+## Blocked Phases
+
+Before changing anything, check the phase's preconditions: the prerequisites `Phase-N.md` lists, and any human gate in `README.md` (such as a `## Human Gates` section) that applies to this phase. If one is not met (an owner action that hasn't happened, an approval not given, an earlier output that doesn't exist), the phase is blocked:
+
+1. Change nothing: no code, no commits, no checkbox updates.
+1. Append `BLOCKED — Phase N: <what is unmet>` as one line under `## Gate Log` in `docs/plans/<plan_id>/feedback.md`.
+1. Report `BLOCKED`, naming the gate or prerequisite as the plan names it (in a `/forge:run` workflow, in the `blockedOn` field).
+
+Never report `IMPLEMENTATION_COMPLETE` for a phase you could not build, and never move review items to Resolved Feedback for one. A blocked phase is not reviewed; the pipeline stops until the owner meets the gate. On a later run, check the gate again first, and if it is met, do the phase normally.
+
 ## Handling Review Feedback
 
 When you receive `CHANGES_REQUESTED` from the Doc Reviewer:
@@ -122,7 +132,8 @@ SendMessage(to="main", summary="<short label>", message="<your full report>")
 ```
 
 The message body carries your full report and ends with your signal on its own
-final line: `IMPLEMENTATION_COMPLETE`.
+final line: `IMPLEMENTATION_COMPLETE`, or `BLOCKED` for a phase you could not build (see
+Blocked Phases).
 
 Emitting that signal as ordinary response text does **not** deliver it. The
 orchestrator sees only an idle notification, cannot route the pipeline, and must

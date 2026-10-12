@@ -159,6 +159,7 @@ For each `Phase-N.md`, include:
 * Previous phases that must be complete
 * External dependencies to verify
 * Environment requirements
+* Any human gate (an owner action, an approval, a spend decision) this phase waits on, named exactly as in the README's `## Human Gates`. The implementer reports `BLOCKED` and the pipeline stops until it is met
 
 ### 3. Tasks
 
