@@ -5,6 +5,22 @@ All notable changes to Claude Forge will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.0] - 2026-10-12
+
+### Fixed
+
+- **A phase blocked on a human gate looped instead of stopping.** A phase waiting on an owner action ran implementer <-> reviewer three times on an unchanged HEAD, then ended as `MAX_ITERATIONS`, which misnamed the cause. `IMPLEMENTATION_COMPLETE` was the only signal an implementer could send, so it reported the block as a finished phase, and the reviewer requested changes on nothing. On resume, recovery read the unbuilt phase as awaiting review, so a reviewer ran first. Seen twice in one plan on 2026-10-11.
+
+### Added
+
+- **`BLOCKED` implementer signal and verdict.** When a prerequisite or a README human gate is unmet, a phase generator (implementer, hygienist, fortifier, doc engineer) changes nothing, logs `BLOCKED — Phase N: <what is unmet>` in the Gate Log, and reports `BLOCKED` with what it is waiting on. No reviewer runs. The run stops with verdict `BLOCKED`, naming the gate, and a resumed run restarts the phase at its implementer, which re-checks it. Both `/forge:run` and `/forge:pipeline`.
+- **No-progress guard.** Reviewers report the commit they reviewed; two `CHANGES_REQUESTED` on the same commit stop the run with verdict `NO_PROGRESS`.
+- **Evaluation:** a `check_blocked_halts` trajectory validator (no review of a blocked phase; only generators report `BLOCKED`); the trace hook records `BLOCKED` in `trace-summary.json`; workflow trajectory tests for the blocked stop, the resume entry, and the guard; Tier A contracts for the protocol table and every phase generator's prompt.
+
+### Changed
+
+- The planner names any human gate a phase waits on in that phase's Prerequisites.
+
 ## [2.1.0] - 2026-10-09
 
 ### Changed
